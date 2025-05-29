@@ -23,6 +23,7 @@ set(LP_SRC_FILES
   ${CMAKE_CURRENT_SOURCE_DIR}/pdhg.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/solver_solution.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/saddle_point.cu
+  ${CMAKE_CURRENT_SOURCE_DIR}/spmv.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/cusparse_view.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/pdlp_hyper_params.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/pdlp_warm_start_data.cu

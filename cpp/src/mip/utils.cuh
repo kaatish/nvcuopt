@@ -15,6 +15,8 @@
  * limitations under the License.
  */
 
+#pragma once
+
 #include <thrust/count.h>
 #include <thrust/functional.h>
 #include <thrust/inner_product.h>
@@ -27,8 +29,6 @@
 #include <utilities/copy_helpers.hpp>
 
 #include <cuopt/linear_programming/mip/solver_settings.hpp>
-
-#pragma once
 
 namespace cuopt::linear_programming::detail {
 

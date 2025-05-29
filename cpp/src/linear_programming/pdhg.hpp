@@ -18,6 +18,7 @@
 #pragma once
 #include <linear_programming/cusparse_view.hpp>
 #include <linear_programming/saddle_point.hpp>
+#include <linear_programming/spmv.cuh>
 #include <linear_programming/utilities/ping_pong_graph.cuh>
 #include <mip/problem/problem.cuh>
 
@@ -53,6 +54,9 @@ class pdhg_solver_t {
   void update_solution(cusparse_view_t<i_t, f_t>& current_op_problem_evaluation_cusparse_view_);
 
   i_t total_pdhg_iterations_;
+  void create_spmv_resource(problem_t<i_t, f_t>& problem,
+                            rmm::device_scalar<f_t>& primal_step_size,
+                            rmm::device_scalar<f_t>& dual_step_size);
 
  private:
   void compute_next_primal_dual_solution(rmm::device_scalar<f_t>& primal_step_size,
@@ -63,6 +67,7 @@ class pdhg_solver_t {
   void compute_next_dual_solution(rmm::device_scalar<f_t>& dual_step_size);
 
   void compute_primal_projection_with_gradient(rmm::device_scalar<f_t>& primal_step_size);
+  void compute_primal_projection_with_gradient(rmm::device_scalar<f_t>& primal_step_size, rmm::cuda_stream_view stream);
   void compute_primal_projection(rmm::device_scalar<f_t>& primal_step_size);
   void compute_At_y();
 
@@ -98,6 +103,9 @@ class pdhg_solver_t {
   // Needed for faster graph launch
   // Passing the host value each time would require updating the graph each time
   rmm::device_scalar<i_t> d_total_pdhg_iterations_;
+
+ public:
+  std::unique_ptr<detail::spmv_t<i_t, f_t>> spmv_ptr;
 };
 
 }  // namespace cuopt::linear_programming::detail

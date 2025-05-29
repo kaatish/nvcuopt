@@ -17,7 +17,9 @@
 
 #pragma once
 
+#include <thrust/binary_search.h>
 #include <mip/problem/problem.cuh>
+#include <mip/utils.cuh>
 
 namespace cuopt::linear_programming::detail {
 

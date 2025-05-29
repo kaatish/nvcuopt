@@ -207,31 +207,54 @@ void adaptive_step_size_strategy_t<i_t, f_t>::compute_step_sizes(
 {
   raft::common::nvtx::range fun_scope("compute_step_sizes");
 
+#if 0
   if (!graph.is_initialized(total_pdlp_iterations)) {
+#endif
+
+    step_size_functor<i_t, f_t> next_step_size_functor{
+    pdhg_solver.get_saddle_point_state().get_next_AtY().data(),
+    pdhg_solver.get_primal_tmp_resource().data()};
+
+    pdhg_solver.spmv_ptr->streams.sync_all_issued();
+    pdhg_solver.spmv_ptr->call_ATy_graph(
+                  make_span(pdhg_solver.get_potential_next_dual_solution()),
+                  make_span(pdhg_solver.get_saddle_point_state().get_next_AtY()),
+                  true,
+                  next_step_size_functor);
+#if 0
     graph.start_capture(total_pdlp_iterations);
+#endif
 
     // compute numerator and deminator of n_lim
-    compute_interaction_and_movement(pdhg_solver.get_primal_tmp_resource(),
+    compute_interaction_and_movement(pdhg_solver.get_potential_next_dual_solution(),
+                                     pdhg_solver.get_primal_tmp_resource(),
                                      pdhg_solver.get_cusparse_view(),
-                                     pdhg_solver.get_saddle_point_state());
+                                     pdhg_solver.get_saddle_point_state(),
+                                     next_step_size_functor,
+                                     pdhg_solver.spmv_ptr);
     // Compute n_lim, n_next and decide if step size is valid
     compute_step_sizes_from_movement_and_interaction<i_t, f_t>
       <<<1, 1, 0, stream_view_>>>(this->view(),
                                   primal_step_size.data(),
                                   dual_step_size.data(),
                                   pdhg_solver.get_d_total_pdhg_iterations().data());
+#if 0
     graph.end_capture(total_pdlp_iterations);
   }
   graph.launch(total_pdlp_iterations);
+#endif
   // Steam sync so that next call can see modification made to host var valid_step_size
   RAFT_CUDA_TRY(cudaStreamSynchronize(stream_view_));
 }
 
 template <typename i_t, typename f_t>
 void adaptive_step_size_strategy_t<i_t, f_t>::compute_interaction_and_movement(
+  rmm::device_uvector<f_t>& potential_next_dual_solution,
   rmm::device_uvector<f_t>& tmp_primal,
   cusparse_view_t<i_t, f_t>& cusparse_view,
-  saddle_point_state_t<i_t, f_t>& current_saddle_point_state)
+  saddle_point_state_t<i_t, f_t>& current_saddle_point_state,
+  step_size_functor<i_t, f_t>& next_step_size_functor,
+  std::unique_ptr<detail::spmv_t<i_t, f_t>>& spmv_ptr)
 {
   // QP would need this:
   // if iszero(problem.objective_matrix)
@@ -263,6 +286,12 @@ void adaptive_step_size_strategy_t<i_t, f_t>::compute_interaction_and_movement(
 
   deltas_are_done_.record(stream_view_);
 
+  //fork streams on deltas_are_done
+
+#if 0
+  spmv_ptr->streams.wait_issued_on_event(deltas_are_done_);
+#endif
+
   // primal_dual_interaction computation => we purposly diverge from the paper (delta_y . (A @ x' -
   // A@x)) to save one SpMV
   // Instead we do: delta_x . (A_t @ y' - A_t @ y)
@@ -274,6 +303,7 @@ void adaptive_step_size_strategy_t<i_t, f_t>::compute_interaction_and_movement(
   // Compute A_t @ (y' - y) = A_t @ y' - 1 * current_AtY
 
   // First compute Ay' to be reused as Ay in next PDHG iteration (if found step size if valid)
+
   RAFT_CUSPARSE_TRY(
     raft::sparse::detail::cusparsespmv(handle_ptr_->get_cusparse_handle(),
                                        CUSPARSE_OPERATION_NON_TRANSPOSE,
@@ -294,6 +324,19 @@ void adaptive_step_size_strategy_t<i_t, f_t>::compute_interaction_and_movement(
     current_saddle_point_state.get_primal_size(),
     raft::sub_op(),
     stream_view_);
+
+#if 0
+  spmv_ptr->call_ATy_graph(
+                make_span(potential_next_dual_solution),
+                make_span(current_saddle_point_state.get_next_AtY()),
+                false,
+                next_step_size_functor);
+
+  auto aty_done = spmv_ptr->streams.create_events_on_issued();
+  spmv_ptr->streams.reset_issued();
+  for (auto& e : aty_done) { cudaStreamWaitEvent(stream_view_, e); }
+#endif
+
 
   // compute interaction (x'-x) . (A(y'-y))
   RAFT_CUBLAS_TRY(
