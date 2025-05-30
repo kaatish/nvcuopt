@@ -166,8 +166,7 @@ void pdhg_solver_t<i_t, f_t>::compute_primal_projection_with_gradient(
 
 template <typename i_t, typename f_t>
 void pdhg_solver_t<i_t, f_t>::compute_primal_projection_with_gradient(
-  rmm::device_scalar<f_t>& primal_step_size,
-  rmm::cuda_stream_view stream)
+  rmm::device_scalar<f_t>& primal_step_size, rmm::cuda_stream_view stream)
 {
   // Applying *c -* A_t @ y
   // x-(tau*primal_gradient)
@@ -221,130 +220,143 @@ void pdhg_solver_t<i_t, f_t>::compute_next_primal_dual_solution(
 #endif
 
     // Primal and dual steps are captured in a cuda graph since called very often
-    //if (!graph_all.is_initialized(total_pdlp_iterations)) {
+    // if (!graph_all.is_initialized(total_pdlp_iterations)) {
 
-      primal_projection_t<i_t, f_t> primal_projection_functor{
-                                        primal_step_size.data(),
-                                        current_saddle_point_state_.get_primal_solution().data(),
-                                        problem_ptr->objective_coefficients.data(),
-                                        problem_ptr->variable_lower_bounds.data(),
-                                        problem_ptr->variable_upper_bounds.data(),
-                                        current_saddle_point_state_.get_delta_primal().data(),
-                                        get_primal_tmp_resource().data(),
-                                        potential_next_primal_solution_.data()};
+#if 1
+    // graph_all.start_capture(total_pdlp_iterations);
+    // compute_At_y();
+    // compute_primal_projection_with_gradient(primal_step_size);
+    // compute_next_dual_solution(dual_step_size);
 
-      dual_projection_t<i_t, f_t> dual_projection_functor{dual_step_size.data(),
-        current_saddle_point_state_.get_dual_solution().data(),
-        problem_ptr->constraint_lower_bounds.data(),
-        problem_ptr->constraint_upper_bounds.data(),
-        potential_next_dual_solution_.data(),
-        current_saddle_point_state_.get_delta_dual().data()};
+    spmv_ptr->ATy_projection(handle_ptr_, total_pdlp_iterations);
+    spmv_ptr->Ax_projection(handle_ptr_, total_pdlp_iterations);
+#else
+    primal_projection_t<i_t, f_t> primal_projection_functor{
+      primal_step_size.data(),
+      current_saddle_point_state_.get_primal_solution().data(),
+      problem_ptr->objective_coefficients.data(),
+      problem_ptr->variable_lower_bounds.data(),
+      problem_ptr->variable_upper_bounds.data(),
+      current_saddle_point_state_.get_delta_primal().data(),
+      get_primal_tmp_resource().data(),
+      potential_next_primal_solution_.data()};
 
-      //clear all streams
-      spmv_ptr->streams.sync_all_issued();
+    dual_projection_t<i_t, f_t> dual_projection_functor{
+      dual_step_size.data(),
+      current_saddle_point_state_.get_dual_solution().data(),
+      problem_ptr->constraint_lower_bounds.data(),
+      problem_ptr->constraint_upper_bounds.data(),
+      potential_next_dual_solution_.data(),
+      current_saddle_point_state_.get_delta_dual().data()};
 
-      //create forking event
-      cudaEvent_t fork_stream_event;
-      cudaEventCreate(&fork_stream_event);
+    // clear all streams
+    spmv_ptr->streams.sync_all_issued();
 
-      //dry-run - internal stream pool captures how many streams were used
-      spmv_ptr->call_ATy_graph(
-          make_span(current_saddle_point_state_.get_dual_solution()),
-          make_span(current_saddle_point_state_.get_current_AtY()),
-          true, primal_projection_functor);
-      auto num_streams_issued = spmv_ptr->streams.reset_issued();
-      spmv_ptr->call_Ax_graph(
-          make_span(get_primal_tmp_resource()),
-          make_span(current_saddle_point_state_.get_dual_gradient()),
-          true, dual_projection_functor);
-      num_streams_issued = std::max(num_streams_issued, spmv_ptr->streams.reset_issued());
+    // create forking event
+    cudaEvent_t fork_stream_event;
+    cudaEventCreate(&fork_stream_event);
 
-      //graph_all.start_capture(total_pdlp_iterations);
-      cudaEventRecord(fork_stream_event, stream_view_);
-      spmv_ptr->streams.wait_on_event(fork_stream_event, num_streams_issued);
+    // dry-run - internal stream pool captures how many streams were used
+    spmv_ptr->call_ATy_graph(make_span(current_saddle_point_state_.get_dual_solution()),
+                             make_span(current_saddle_point_state_.get_current_AtY()),
+                             true,
+                             primal_projection_functor);
+    auto num_streams_issued = spmv_ptr->streams.reset_issued();
+    spmv_ptr->call_Ax_graph(make_span(get_primal_tmp_resource()),
+                            make_span(current_saddle_point_state_.get_dual_gradient()),
+                            true,
+                            dual_projection_functor);
+    num_streams_issued = std::max(num_streams_issued, spmv_ptr->streams.reset_issued());
 
-      // First compute only A_t @ y, needed later in adaptative step size
-      // Compute fused primal gradient with projection
-      spmv_ptr->call_ATy_graph(
-          make_span(current_saddle_point_state_.get_dual_solution()),
-          make_span(current_saddle_point_state_.get_current_AtY()),
-          false, primal_projection_functor);
-      //compute_At_y();
-      //compute_primal_projection_with_gradient(primal_step_size);
+    graph_all.start_capture(total_pdlp_iterations);
+    cudaEventRecord(fork_stream_event, stream_view_);
+    spmv_ptr->streams.wait_on_event(fork_stream_event, num_streams_issued);
 
-      auto aty_done = spmv_ptr->streams.create_events(num_streams_issued);
-      spmv_ptr->streams.reset_issued();
-      for (auto& e : aty_done) { cudaStreamWaitEvent(stream_view_, e); }
+    // First compute only A_t @ y, needed later in adaptative step size
+    // Compute fused primal gradient with projection
+    spmv_ptr->call_ATy_graph(make_span(current_saddle_point_state_.get_dual_solution()),
+                             make_span(current_saddle_point_state_.get_current_AtY()),
+                             false,
+                             primal_projection_functor);
+    // compute_At_y();
+    // compute_primal_projection_with_gradient(primal_step_size);
 
+    auto aty_done = spmv_ptr->streams.create_events(num_streams_issued);
+    spmv_ptr->streams.reset_issued();
+    for (auto& e : aty_done) {
+      cudaStreamWaitEvent(stream_view_, e);
+    }
 
-      // Compute next dual solution
-      spmv_ptr->call_Ax_graph(
-          make_span(get_primal_tmp_resource()),
-          make_span(current_saddle_point_state_.get_dual_gradient()),
-          false, dual_projection_functor);
-      //compute_next_dual_solution(dual_step_size);
+    // Compute next dual solution
+    spmv_ptr->call_Ax_graph(make_span(get_primal_tmp_resource()),
+                            make_span(current_saddle_point_state_.get_dual_gradient()),
+                            false,
+                            dual_projection_functor);
+    // compute_next_dual_solution(dual_step_size);
 
-      auto ax_done = spmv_ptr->streams.create_events(num_streams_issued);
-      spmv_ptr->streams.reset_issued();
-      for (auto& e : ax_done) { cudaStreamWaitEvent(stream_view_, e); }
+    auto ax_done = spmv_ptr->streams.create_events(num_streams_issued);
+    spmv_ptr->streams.reset_issued();
+    for (auto& e : ax_done) {
+      cudaStreamWaitEvent(stream_view_, e);
+    }
+#endif
 
-      //graph_all.end_capture(total_pdlp_iterations);
+    //  graph_all.end_capture(total_pdlp_iterations);
     //}
-    //graph_all.launch(total_pdlp_iterations);
-    RAFT_CUDA_TRY(cudaStreamSynchronize(stream_view_));
+    // graph_all.launch(total_pdlp_iterations);
+    // RAFT_CUDA_TRY(cudaStreamSynchronize(stream_view_));
   } else {
 #ifdef PDLP_DEBUG_MODE
     std::cout << "    Not computing A_t * Y" << std::endl;
 #endif
     // A_t * y was already computed in previous iteration
-    //if (!graph_prim_proj_gradient_dual.is_initialized(total_pdlp_iterations)) {
-
-      dual_projection_t<i_t, f_t> dual_projection_functor{dual_step_size.data(),
+    if (!graph_prim_proj_gradient_dual.is_initialized(total_pdlp_iterations)) {
+      dual_projection_t<i_t, f_t> dual_projection_functor{
+        dual_step_size.data(),
         current_saddle_point_state_.get_dual_solution().data(),
         problem_ptr->constraint_lower_bounds.data(),
         problem_ptr->constraint_upper_bounds.data(),
         potential_next_dual_solution_.data(),
         current_saddle_point_state_.get_delta_dual().data()};
 
-      //clear all streams
+      // clear all streams
       spmv_ptr->streams.sync_all_issued();
 
-      //create forking event
+      // create forking event
       cudaEvent_t fork_stream_event;
       cudaEventCreate(&fork_stream_event);
 
-      //dry-run - internal stream pool captures how many streams were used
-      spmv_ptr->call_Ax_graph(
-          make_span(get_primal_tmp_resource()),
-          make_span(current_saddle_point_state_.get_dual_gradient()),
-          true, dual_projection_functor);
+      // dry-run - internal stream pool captures how many streams were used
+      spmv_ptr->call_Ax_graph(make_span(get_primal_tmp_resource()),
+                              make_span(current_saddle_point_state_.get_dual_gradient()),
+                              true,
+                              dual_projection_functor);
 
-      //graph_prim_proj_gradient_dual.start_capture(total_pdlp_iterations);
+      graph_prim_proj_gradient_dual.start_capture(total_pdlp_iterations);
+
+      compute_primal_projection_with_gradient(primal_step_size, stream_view_);
 
       cudaEventRecord(fork_stream_event, stream_view_);
       spmv_ptr->streams.wait_issued_on_event(fork_stream_event);
-
       spmv_ptr->streams.reset_issued();
 
-      compute_primal_projection_with_gradient(primal_step_size, spmv_ptr->streams.get_stream());
-
-      spmv_ptr->streams.sync_all_issued();
-
-      //spmv_ptr->streams.reset_issued();
-      //compute_next_dual_solution(dual_step_size);
-      spmv_ptr->call_Ax_graph(
-          make_span(get_primal_tmp_resource()),
-          make_span(current_saddle_point_state_.get_dual_gradient()),
-          false, dual_projection_functor);
+      // spmv_ptr->streams.reset_issued();
+      // compute_next_dual_solution(dual_step_size);
+      spmv_ptr->call_Ax_graph(make_span(get_primal_tmp_resource()),
+                              make_span(current_saddle_point_state_.get_dual_gradient()),
+                              false,
+                              dual_projection_functor);
 
       auto ax_done = spmv_ptr->streams.create_events_on_issued();
       spmv_ptr->streams.reset_issued();
-      for (auto& e : ax_done) { cudaStreamWaitEvent(stream_view_, e); }
+      for (auto& e : ax_done) {
+        cudaStreamWaitEvent(stream_view_, e);
+      }
 
-      //graph_prim_proj_gradient_dual.end_capture(total_pdlp_iterations);
-    //}
-    //graph_prim_proj_gradient_dual.launch(total_pdlp_iterations);
-    RAFT_CUDA_TRY(cudaStreamSynchronize(stream_view_));
+      graph_prim_proj_gradient_dual.end_capture(total_pdlp_iterations);
+    }
+    graph_prim_proj_gradient_dual.launch(total_pdlp_iterations);
+    // RAFT_CUDA_TRY(cudaStreamSynchronize(stream_view_));
   }
 }
 

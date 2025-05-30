@@ -79,13 +79,12 @@ class adaptive_step_size_strategy_t {
   void set_valid_step_size(i_t);
 
  private:
-  void compute_interaction_and_movement(
-  rmm::device_uvector<f_t>& potential_next_dual_solution,
-  rmm::device_uvector<f_t>& tmp_primal,
-  cusparse_view_t<i_t, f_t>& cusparse_view,
-  saddle_point_state_t<i_t, f_t>& current_saddle_point_state,
-  step_size_functor<i_t, f_t>& next_step_size_functor,
-  std::unique_ptr<detail::spmv_t<i_t, f_t>>& spmv_ptr);
+  void compute_interaction_and_movement(rmm::device_uvector<f_t>& potential_next_dual_solution,
+                                        rmm::device_uvector<f_t>& tmp_primal,
+                                        cusparse_view_t<i_t, f_t>& cusparse_view,
+                                        saddle_point_state_t<i_t, f_t>& current_saddle_point_state,
+                                        step_size_functor<i_t, f_t>& next_step_size_functor,
+                                        std::unique_ptr<detail::spmv_t<i_t, f_t>>& spmv_ptr);
 
   // Stream pool to run different step size computation in parallel
   // Because we already have the main stream, we just need 2 extra streams from this

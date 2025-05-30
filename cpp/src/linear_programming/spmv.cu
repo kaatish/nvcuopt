@@ -12,10 +12,10 @@
 
 #include <linear_programming/pdlp.cuh>
 #include <mip/mip_constants.hpp>
+#include "spmv.cuh"
 #include "spmv_helpers.cuh"
 #include "spmv_setup_helpers.cuh"
 #include "utils.cuh"
-#include "spmv.cuh"
 
 #include <nvtx3/nvtx3.hpp>
 
@@ -69,51 +69,53 @@ spmv_t<i_t, f_t>::spmv_t(problem_t<i_t, f_t>& problem_,
     warp_vars_offsets(0, problem_.handle_ptr->get_stream()),
     warp_vars_id_offsets(0, problem_.handle_ptr->get_stream()),
     cnst_binner(handle_ptr),
-    vars_binner(handle_ptr)
-    //ax_input(ax_input_),
-    //ax_output(ax_output_),
-    //aty_input(aty_input_),
-    //aty_output(aty_output_),
-    //aty_next_input(aty_next_input_),
-    //aty_next_output(aty_next_output_),
-    //ax_graph_created(false),
-    //aty_graph_created(false),
-    //aty_next_graph_created(false),
-    //ax_exec(nullptr),
-    //aty_exec(nullptr),
-    //aty_exec_proj(nullptr),
-    //aty_next_exec(nullptr),
-    //aty_next_exec_proj(nullptr),
-    //current_primal_projection_functor_(primal_step_size,
-    //                                   primal_solution.data(),
-    //                                   problem_.objective_coefficients.data(),
-    //                                   problem_.variable_lower_bounds.data(),
-    //                                   problem_.variable_upper_bounds.data(),
-    //                                   delta_primal.data(),
-    //                                   ax_input_.data(),
-    //                                   next_primal_solution.data()),
-    //next_primal_projection_functor_(primal_step_size,
-    //                                next_primal_solution.data(),
-    //                                problem_.objective_coefficients.data(),
-    //                                problem_.variable_lower_bounds.data(),
-    //                                problem_.variable_upper_bounds.data(),
-    //                                delta_primal.data(),
-    //                                ax_input_.data(),
-    //                                primal_solution.data()),
-    //current_dual_projection_functor_(dual_step_size,
-    //                                 dual_solution.data(),
-    //                                 problem_.constraint_lower_bounds.data(),
-    //                                 problem_.constraint_upper_bounds.data(),
-    //                                 next_dual_solution.data(),
-    //                                 delta_dual.data()),
-    //next_dual_projection_functor_(dual_step_size,
-    //                              next_dual_solution.data(),
-    //                              problem_.constraint_lower_bounds.data(),
-    //                              problem_.constraint_upper_bounds.data(),
-    //                              dual_solution.data(),
-    //                              delta_dual.data()),
-    //current_step_size_functor_(aty_output_.data(), ax_input_.data()),
-    //next_step_size_functor_(aty_next_output_.data(), ax_input_.data())
+    vars_binner(handle_ptr),
+    ax_input(ax_input_),
+    ax_output(ax_output_),
+    aty_input(aty_input_),
+    aty_output(aty_output_),
+    aty_next_input(aty_next_input_),
+    aty_next_output(aty_next_output_),
+    // ax_graph_created(false),
+    // aty_graph_created(false),
+    // aty_next_graph_created(false),
+    // ax_exec(nullptr),
+    // aty_exec(nullptr),
+    ax_exec_proj(nullptr),
+    ax_next_exec_proj(nullptr),
+    aty_exec_proj(nullptr),
+    // aty_next_exec(nullptr),
+    aty_next_exec_proj(nullptr),
+    current_primal_projection_functor_(primal_step_size,
+                                       primal_solution.data(),
+                                       problem_.objective_coefficients.data(),
+                                       problem_.variable_lower_bounds.data(),
+                                       problem_.variable_upper_bounds.data(),
+                                       delta_primal.data(),
+                                       ax_input_.data(),
+                                       next_primal_solution.data()),
+    next_primal_projection_functor_(primal_step_size,
+                                    next_primal_solution.data(),
+                                    problem_.objective_coefficients.data(),
+                                    problem_.variable_lower_bounds.data(),
+                                    problem_.variable_upper_bounds.data(),
+                                    delta_primal.data(),
+                                    ax_input_.data(),
+                                    primal_solution.data()),
+    current_dual_projection_functor_(dual_step_size,
+                                     dual_solution.data(),
+                                     problem_.constraint_lower_bounds.data(),
+                                     problem_.constraint_upper_bounds.data(),
+                                     next_dual_solution.data(),
+                                     delta_dual.data()),
+    next_dual_projection_functor_(dual_step_size,
+                                  next_dual_solution.data(),
+                                  problem_.constraint_lower_bounds.data(),
+                                  problem_.constraint_upper_bounds.data(),
+                                  dual_solution.data(),
+                                  delta_dual.data())
+// current_step_size_functor_(aty_output_.data(), ax_input_.data()),
+// next_step_size_functor_(aty_next_output_.data(), ax_input_.data())
 {
   setup_lb_problem(problem_, debug);
   setup_lb_meta();
@@ -121,13 +123,13 @@ spmv_t<i_t, f_t>::spmv_t(problem_t<i_t, f_t>& problem_,
 template <typename i_t, typename f_t>
 spmv_t<i_t, f_t>::~spmv_t()
 {
-  //if (ax_graph_created) { cudaGraphExecDestroy(ax_exec); }
-  //if (aty_graph_created) { cudaGraphExecDestroy(aty_exec); }
-  //if (aty_next_graph_created) { cudaGraphExecDestroy(aty_next_exec); }
-  //if (aty_graph_proj_created) { cudaGraphExecDestroy(aty_exec_proj); }
-  //if (aty_graph_proj_next_created) { cudaGraphExecDestroy(aty_next_exec_proj); }
-  //if (ax_graph_proj_created) { cudaGraphExecDestroy(ax_exec_proj); }
-  //if (ax_graph_proj_next_created) { cudaGraphExecDestroy(ax_next_exec_proj); }
+  // if (ax_graph_created) { cudaGraphExecDestroy(ax_exec); }
+  // if (aty_graph_created) { cudaGraphExecDestroy(aty_exec); }
+  // if (aty_next_graph_created) { cudaGraphExecDestroy(aty_next_exec); }
+  if (aty_graph_proj_created) { cudaGraphExecDestroy(aty_exec_proj); }
+  if (aty_graph_proj_next_created) { cudaGraphExecDestroy(aty_next_exec_proj); }
+  if (ax_graph_proj_created) { cudaGraphExecDestroy(ax_exec_proj); }
+  if (ax_graph_proj_next_created) { cudaGraphExecDestroy(ax_next_exec_proj); }
 }
 
 template <typename i_t, typename f_t>
@@ -230,13 +232,13 @@ void spmv_t<i_t, f_t>::setup_lb_meta()
 {
   auto stream = handle_ptr->get_stream();
   stream.synchronize();
-  //ax_graph_created            = false;
-  //aty_graph_created           = false;
-  //aty_next_graph_created      = false;
-  //aty_graph_proj_created      = false;
-  //aty_graph_proj_next_created = false;
-  //ax_graph_proj_created       = false;
-  //ax_graph_proj_next_created  = false;
+  // ax_graph_created            = false;
+  // aty_graph_created           = false;
+  // aty_next_graph_created      = false;
+  aty_graph_proj_created      = false;
+  aty_graph_proj_next_created = false;
+  ax_graph_proj_created       = false;
+  ax_graph_proj_next_created  = false;
 
   num_blocks_heavy_cnst = create_heavy_item_block_segments(stream,
                                                            heavy_cnst_vertex_ids,
@@ -268,144 +270,143 @@ void spmv_t<i_t, f_t>::setup_lb_meta()
 
   // TODO remove
   if (!ax_graph_created) {
-    //ax_graph_created = build_graph(
-    //  streams,
-    //  handle_ptr,
-    //  ax_graph,
-    //  ax_exec,
-    //  [&]() { this->call_Ax_graph(ax_input, ax_output, true); },
-    //  [&]() { this->call_Ax_graph(ax_input, ax_output); });
+    // ax_graph_created = build_graph(
+    //   streams,
+    //   handle_ptr,
+    //   ax_graph,
+    //   ax_exec,
+    //   [&]() { this->call_Ax_graph(ax_input, ax_output, true); },
+    //   [&]() { this->call_Ax_graph(ax_input, ax_output); });
   }
 
   streams.sync_all_issued();
   if (!aty_graph_created) {
-    //aty_graph_created = build_graph(
-    //  streams,
-    //  handle_ptr,
-    //  aty_graph,
-    //  aty_exec,
-    //  [this]() { this->call_ATy_graph(aty_input, aty_output, true, next_step_size_functor_); },
-    //  [this]() { this->call_ATy_graph(aty_input, aty_output, false, next_step_size_functor_); });
+    // aty_graph_created = build_graph(
+    //   streams,
+    //   handle_ptr,
+    //   aty_graph,
+    //   aty_exec,
+    //   [this]() { this->call_ATy_graph(aty_input, aty_output, true, next_step_size_functor_); },
+    //   [this]() { this->call_ATy_graph(aty_input, aty_output, false, next_step_size_functor_); });
   }
 
   streams.sync_all_issued();
   if (!aty_next_graph_created) {
-    //aty_next_graph_created = build_graph(
-    //  streams,
-    //  handle_ptr,
-    //  aty_next_graph,
-    //  aty_next_exec,
-    //  [this]() {
-    //    this->call_ATy_graph(aty_next_input, aty_next_output, true, current_step_size_functor_);
-    //  },
-    //  [this]() {
-    //    this->call_ATy_graph(aty_next_input, aty_next_output, false, current_step_size_functor_);
-    //  });
+    // aty_next_graph_created = build_graph(
+    //   streams,
+    //   handle_ptr,
+    //   aty_next_graph,
+    //   aty_next_exec,
+    //   [this]() {
+    //     this->call_ATy_graph(aty_next_input, aty_next_output, true, current_step_size_functor_);
+    //   },
+    //   [this]() {
+    //     this->call_ATy_graph(aty_next_input, aty_next_output, false, current_step_size_functor_);
+    //   });
   }
 
   if (!aty_graph_proj_created) {
-    //aty_graph_proj_created = build_graph(
-    //  streams,
-    //  handle_ptr,
-    //  aty_graph_proj,
-    //  aty_exec_proj,
-    //  [this]() {
-    //    this->call_ATy_graph(aty_input, aty_output, true, current_primal_projection_functor_);
-    //  },
-    //  [this]() {
-    //    this->call_ATy_graph(aty_input, aty_output, false, current_primal_projection_functor_);
-    //  });
+    aty_graph_proj_created = build_graph(
+      streams,
+      handle_ptr,
+      aty_graph_proj,
+      aty_exec_proj,
+      [this]() {
+        this->call_ATy_graph(aty_input, aty_output, true, current_primal_projection_functor_);
+      },
+      [this]() {
+        this->call_ATy_graph(aty_input, aty_output, false, current_primal_projection_functor_);
+      });
   }
 
   if (!aty_graph_proj_next_created) {
-    //aty_graph_proj_next_created = build_graph(
-    //  streams,
-    //  handle_ptr,
-    //  aty_graph_proj_next,
-    //  aty_next_exec_proj,
-    //  [this]() {
-    //    this->call_ATy_graph(
-    //      aty_next_input, aty_next_output, true, next_primal_projection_functor_);
-    //  },
-    //  [this]() {
-    //    this->call_ATy_graph(
-    //      aty_next_input, aty_next_output, false, next_primal_projection_functor_);
-    //  });
+    aty_graph_proj_next_created = build_graph(
+      streams,
+      handle_ptr,
+      aty_graph_proj_next,
+      aty_next_exec_proj,
+      [this]() {
+        this->call_ATy_graph(
+          aty_next_input, aty_next_output, true, next_primal_projection_functor_);
+      },
+      [this]() {
+        this->call_ATy_graph(
+          aty_next_input, aty_next_output, false, next_primal_projection_functor_);
+      });
   }
 
   if (!ax_graph_proj_created) {
-    //ax_graph_proj_created = build_graph(
-    //  streams,
-    //  handle_ptr,
-    //  ax_graph_proj,
-    //  ax_exec_proj,
-    //  [this]() {
-    //    this->call_Ax_graph(ax_input, ax_output, true, current_dual_projection_functor_);
-    //  },
-    //  [this]() {
-    //    this->call_Ax_graph(ax_input, ax_output, false, current_dual_projection_functor_);
-    //  });
+    ax_graph_proj_created = build_graph(
+      streams,
+      handle_ptr,
+      ax_graph_proj,
+      ax_exec_proj,
+      [this]() {
+        this->call_Ax_graph(ax_input, ax_output, true, current_dual_projection_functor_);
+      },
+      [this]() {
+        this->call_Ax_graph(ax_input, ax_output, false, current_dual_projection_functor_);
+      });
   }
 
   if (!ax_graph_proj_next_created) {
-    //ax_graph_proj_next_created = build_graph(
-    //  streams,
-    //  handle_ptr,
-    //  ax_graph_proj_next,
-    //  ax_next_exec_proj,
-    //  // No ax_next_output since we don't write the Ax result anyway
-    //  [this]() { this->call_Ax_graph(ax_input, ax_output, true, next_dual_projection_functor_); },
-    //  [this]() { this->call_Ax_graph(ax_input, ax_output, false, next_dual_projection_functor_); });
+    ax_graph_proj_next_created = build_graph(
+      streams,
+      handle_ptr,
+      ax_graph_proj_next,
+      ax_next_exec_proj,
+      // No ax_next_output since we don't write the Ax result anyway
+      [this]() { this->call_Ax_graph(ax_input, ax_output, true, next_dual_projection_functor_); },
+      [this]() { this->call_Ax_graph(ax_input, ax_output, false, next_dual_projection_functor_); });
   }
 }
 
 template <typename i_t, typename f_t>
 void spmv_t<i_t, f_t>::Ax(const raft::handle_t* h)
 {
-  //raft::common::nvtx::range scope("ax");
-  //cudaGraphLaunch(ax_exec, h->get_stream());
+  // raft::common::nvtx::range scope("ax");
+  // cudaGraphLaunch(ax_exec, h->get_stream());
 }
 
 template <typename i_t, typename f_t>
 void spmv_t<i_t, f_t>::Ax_projection(const raft::handle_t* h, i_t total_pdlp_iterations)
 {
-  //raft::common::nvtx::range scope("ax");
-  //if (total_pdlp_iterations % 2 == 0) {
-  //  RAFT_CUDA_TRY(cudaGraphLaunch(ax_exec_proj, h->get_stream()));
-  //} else if (total_pdlp_iterations % 2 == 1) {
-  //  RAFT_CUDA_TRY(cudaGraphLaunch(ax_next_exec_proj, h->get_stream()));
-  //} else {
-  //  std::cerr << "Ax projection unexpected call\n";
-  //}
+  raft::common::nvtx::range scope("ax");
+  if (total_pdlp_iterations % 2 == 0) {
+    RAFT_CUDA_TRY(cudaGraphLaunch(ax_exec_proj, h->get_stream()));
+  } else if (total_pdlp_iterations % 2 == 1) {
+    RAFT_CUDA_TRY(cudaGraphLaunch(ax_next_exec_proj, h->get_stream()));
+  } else {
+    std::cerr << "Ax projection unexpected call\n";
+  }
 }
 
 template <typename i_t, typename f_t>
 void spmv_t<i_t, f_t>::ATy_projection(const raft::handle_t* h, i_t total_pdlp_iterations)
 {
-  //raft::common::nvtx::range scope("ay");
-  //if (total_pdlp_iterations % 2 == 0) {
-  //  RAFT_CUDA_TRY(cudaGraphLaunch(aty_exec_proj, h->get_stream()));
-  //} else if (total_pdlp_iterations % 2 == 1) {
-  //  RAFT_CUDA_TRY(cudaGraphLaunch(aty_next_exec_proj, h->get_stream()));
-  //} else {
-  //  std::cerr << "ATy projection unexpected call\n";
-  //}
+  raft::common::nvtx::range scope("ay");
+  if (total_pdlp_iterations % 2 == 0) {
+    RAFT_CUDA_TRY(cudaGraphLaunch(aty_exec_proj, h->get_stream()));
+  } else if (total_pdlp_iterations % 2 == 1) {
+    RAFT_CUDA_TRY(cudaGraphLaunch(aty_next_exec_proj, h->get_stream()));
+  } else {
+    std::cerr << "ATy projection unexpected call\n";
+  }
 }
 
-// TODO use total instead
 template <typename i_t, typename f_t>
 void spmv_t<i_t, f_t>::ATy(const raft::handle_t* h,
                            raft::device_span<f_t> input,
                            raft::device_span<f_t> output)
 {
-  //raft::common::nvtx::range scope("ay");
-  //if (input.data() == aty_input.data() && output.data() == aty_output.data()) {
-  //  cudaGraphLaunch(aty_exec, h->get_stream());
-  //} else if (input.data() == aty_next_input.data() && output.data() == aty_next_output.data()) {
-  //  cudaGraphLaunch(aty_next_exec, h->get_stream());
-  //} else {
-  //  std::cerr << "ATy unexpected call\n";
-  //}
+  // raft::common::nvtx::range scope("ay");
+  // if (input.data() == aty_input.data() && output.data() == aty_output.data()) {
+  //   cudaGraphLaunch(aty_exec, h->get_stream());
+  // } else if (input.data() == aty_next_input.data() && output.data() == aty_next_output.data()) {
+  //   cudaGraphLaunch(aty_next_exec, h->get_stream());
+  // } else {
+  //   std::cerr << "ATy unexpected call\n";
+  // }
 }
 
 template <typename i_t, typename f_t>

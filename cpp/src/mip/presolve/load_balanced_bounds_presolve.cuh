@@ -25,8 +25,8 @@
 #include <mip/solver_context.cuh>
 #include <mip/utils.cuh>
 
-#include <utilities/timer.hpp>
 #include <utilities/managed_stream_pool.cuh>
+#include <utilities/timer.hpp>
 
 #include "load_balanced_partition_helpers.cuh"
 #include "utils.cuh"

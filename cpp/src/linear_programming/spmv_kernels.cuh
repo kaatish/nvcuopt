@@ -40,10 +40,10 @@ __device__ f_t spmv(view_t view, raft::device_span<f_t> input, i_t tid, i_t beg,
     auto var   = view.elem[i];
     auto in    = input[var];
     f_t y      = __fma_rn(coeff, in, -c);
-    //f_t y      = coeff * in - c;
-    f_t t      = out + y;
-    c          = (t - out) - y;
-    out        = t;
+    // f_t y      = coeff * in - c;
+    f_t t = out + y;
+    c     = (t - out) - y;
+    out   = t;
   }
   return out;
 }
@@ -245,8 +245,12 @@ __device__ __forceinline__ void get_sub_warp_bin(i_t* id_warp_beg,
     *t_p_v = 0;
     return;
   }
-  if (seg >= bin_offsets.size()) { printf("get bin oob %d %d warp %d\n", seg, int(bin_offsets.size()), warp_id); }
-  if (seg+1 >= bin_offsets.size()) { printf("get bin+1 oob %d %d warp %d\n", seg+1, int(bin_offsets.size()), warp_id); }
+  if (seg >= bin_offsets.size()) {
+    printf("get bin oob %d %d warp %d\n", seg, int(bin_offsets.size()), warp_id);
+  }
+  if (seg + 1 >= bin_offsets.size()) {
+    printf("get bin+1 oob %d %d warp %d\n", seg + 1, int(bin_offsets.size()), warp_id);
+  }
   if (seg >= warp_offsets.size()) { printf("get bin warp_offsets oob\n"); }
   i_t beg       = bin_offsets[seg] + (warp_id - warp_offsets[seg]) * it_per_warp;
   i_t end       = bin_offsets[seg + 1];

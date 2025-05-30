@@ -67,7 +67,8 @@ class pdhg_solver_t {
   void compute_next_dual_solution(rmm::device_scalar<f_t>& dual_step_size);
 
   void compute_primal_projection_with_gradient(rmm::device_scalar<f_t>& primal_step_size);
-  void compute_primal_projection_with_gradient(rmm::device_scalar<f_t>& primal_step_size, rmm::cuda_stream_view stream);
+  void compute_primal_projection_with_gradient(rmm::device_scalar<f_t>& primal_step_size,
+                                               rmm::cuda_stream_view stream);
   void compute_primal_projection(rmm::device_scalar<f_t>& primal_step_size);
   void compute_At_y();
 

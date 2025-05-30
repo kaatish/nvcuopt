@@ -41,6 +41,9 @@ adaptive_step_size_strategy_t<i_t, f_t>::adaptive_step_size_strategy_t(
   rmm::device_scalar<f_t>* primal_weight,
   rmm::device_scalar<f_t>* step_size)
   : stream_pool_(parallel_stream_computation),
+    // dot_delta_X_(),
+    // dot_delta_Y_(),
+    // deltas_are_done_(),
     dot_delta_X_(cudaEventDisableTiming),
     dot_delta_Y_(cudaEventDisableTiming),
     deltas_are_done_(cudaEventDisableTiming),
@@ -207,21 +210,21 @@ void adaptive_step_size_strategy_t<i_t, f_t>::compute_step_sizes(
 {
   raft::common::nvtx::range fun_scope("compute_step_sizes");
 
-#if 0
+#if 1
   if (!graph.is_initialized(total_pdlp_iterations)) {
 #endif
 
     step_size_functor<i_t, f_t> next_step_size_functor{
-    pdhg_solver.get_saddle_point_state().get_next_AtY().data(),
-    pdhg_solver.get_primal_tmp_resource().data()};
+      pdhg_solver.get_saddle_point_state().get_current_AtY().data(),
+      pdhg_solver.get_primal_tmp_resource().data()};
 
     pdhg_solver.spmv_ptr->streams.sync_all_issued();
     pdhg_solver.spmv_ptr->call_ATy_graph(
-                  make_span(pdhg_solver.get_potential_next_dual_solution()),
-                  make_span(pdhg_solver.get_saddle_point_state().get_next_AtY()),
-                  true,
-                  next_step_size_functor);
-#if 0
+      make_span(pdhg_solver.get_potential_next_dual_solution()),
+      make_span(pdhg_solver.get_saddle_point_state().get_next_AtY()),
+      true,
+      next_step_size_functor);
+#if 1
     graph.start_capture(total_pdlp_iterations);
 #endif
 
@@ -238,7 +241,7 @@ void adaptive_step_size_strategy_t<i_t, f_t>::compute_step_sizes(
                                   primal_step_size.data(),
                                   dual_step_size.data(),
                                   pdhg_solver.get_d_total_pdhg_iterations().data());
-#if 0
+#if 1
     graph.end_capture(total_pdlp_iterations);
   }
   graph.launch(total_pdlp_iterations);
@@ -286,10 +289,11 @@ void adaptive_step_size_strategy_t<i_t, f_t>::compute_interaction_and_movement(
 
   deltas_are_done_.record(stream_view_);
 
-  //fork streams on deltas_are_done
+  // fork streams on deltas_are_done
 
-#if 0
+#if 1
   spmv_ptr->streams.wait_issued_on_event(deltas_are_done_);
+  spmv_ptr->streams.reset_issued();
 #endif
 
   // primal_dual_interaction computation => we purposly diverge from the paper (delta_y . (A @ x' -
@@ -304,6 +308,7 @@ void adaptive_step_size_strategy_t<i_t, f_t>::compute_interaction_and_movement(
 
   // First compute Ay' to be reused as Ay in next PDHG iteration (if found step size if valid)
 
+#if 0
   RAFT_CUSPARSE_TRY(
     raft::sparse::detail::cusparsespmv(handle_ptr_->get_cusparse_handle(),
                                        CUSPARSE_OPERATION_NON_TRANSPOSE,
@@ -325,18 +330,23 @@ void adaptive_step_size_strategy_t<i_t, f_t>::compute_interaction_and_movement(
     raft::sub_op(),
     stream_view_);
 
-#if 0
-  spmv_ptr->call_ATy_graph(
-                make_span(potential_next_dual_solution),
-                make_span(current_saddle_point_state.get_next_AtY()),
-                false,
-                next_step_size_functor);
+#else
+  spmv_ptr->call_ATy_graph(make_span(potential_next_dual_solution),
+                           make_span(current_saddle_point_state.get_next_AtY()),
+                           false,
+                           next_step_size_functor);
+
+  // spmv_ptr->streams.sync_all_issued();
+  // stream_view_.synchronize();
+  // stream_pool_.get_stream(0).synchronize();
+  // stream_pool_.get_stream(1).synchronize();
 
   auto aty_done = spmv_ptr->streams.create_events_on_issued();
   spmv_ptr->streams.reset_issued();
-  for (auto& e : aty_done) { cudaStreamWaitEvent(stream_view_, e); }
+  for (auto& e : aty_done) {
+    cudaStreamWaitEvent(stream_view_, e);
+  }
 #endif
-
 
   // compute interaction (x'-x) . (A(y'-y))
   RAFT_CUBLAS_TRY(

@@ -234,14 +234,14 @@ class spmv_t {
   vertex_bin_t<i_t> cnst_binner;
   vertex_bin_t<i_t> vars_binner;
 
-  //raft::device_span<f_t> ax_input;
-  //raft::device_span<f_t> ax_output;
+  raft::device_span<f_t> ax_input;
+  raft::device_span<f_t> ax_output;
 
-  //raft::device_span<f_t> aty_input;
-  //raft::device_span<f_t> aty_output;
+  raft::device_span<f_t> aty_input;
+  raft::device_span<f_t> aty_output;
 
-  //raft::device_span<f_t> aty_next_input;
-  //raft::device_span<f_t> aty_next_output;
+  raft::device_span<f_t> aty_next_input;
+  raft::device_span<f_t> aty_next_output;
 
   //// spmv graphs
   //// TODO remove
@@ -253,35 +253,35 @@ class spmv_t {
   bool ax_graph_proj_created;
   bool ax_graph_proj_next_created;
 
-  //cudaGraphExec_t ax_exec;
-  //cudaGraph_t ax_graph;
+  // cudaGraphExec_t ax_exec;
+  // cudaGraph_t ax_graph;
 
-  //cudaGraphExec_t aty_exec;
-  //cudaGraph_t aty_graph;
+  // cudaGraphExec_t aty_exec;
+  // cudaGraph_t aty_graph;
 
-  //cudaGraphExec_t aty_next_exec;
-  //cudaGraph_t aty_next_graph;
+  // cudaGraphExec_t aty_next_exec;
+  // cudaGraph_t aty_next_graph;
 
-  //step_size_functor<i_t, f_t> current_step_size_functor_;
-  //step_size_functor<i_t, f_t> next_step_size_functor_;
+  // step_size_functor<i_t, f_t> current_step_size_functor_;
+  // step_size_functor<i_t, f_t> next_step_size_functor_;
 
-  //cudaGraphExec_t aty_exec_proj;
-  //cudaGraph_t aty_graph_proj;
+  cudaGraphExec_t aty_exec_proj;
+  cudaGraph_t aty_graph_proj;
 
-  //cudaGraphExec_t aty_next_exec_proj;
-  //cudaGraph_t aty_graph_proj_next;
+  cudaGraphExec_t aty_next_exec_proj;
+  cudaGraph_t aty_graph_proj_next;
 
-  //primal_projection_t<i_t, f_t> current_primal_projection_functor_;
-  //primal_projection_t<i_t, f_t> next_primal_projection_functor_;
+  primal_projection_t<i_t, f_t> current_primal_projection_functor_;
+  primal_projection_t<i_t, f_t> next_primal_projection_functor_;
 
-  //cudaGraphExec_t ax_exec_proj;
-  //cudaGraph_t ax_graph_proj;
+  cudaGraphExec_t ax_exec_proj;
+  cudaGraph_t ax_graph_proj;
 
-  //cudaGraphExec_t ax_next_exec_proj;
-  //cudaGraph_t ax_graph_proj_next;
+  cudaGraphExec_t ax_next_exec_proj;
+  cudaGraph_t ax_graph_proj_next;
 
-  //dual_projection_t<i_t, f_t> current_dual_projection_functor_;
-  //dual_projection_t<i_t, f_t> next_dual_projection_functor_;
+  dual_projection_t<i_t, f_t> current_dual_projection_functor_;
+  dual_projection_t<i_t, f_t> next_dual_projection_functor_;
 };
 
 template <typename i_t, typename f_t>

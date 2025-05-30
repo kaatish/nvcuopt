@@ -13,12 +13,12 @@
 #pragma once
 
 #include <mip/presolve/load_balanced_partition_helpers.cuh>
-//#include <mip/presolve/load_balanced_bounds_presolve_helpers.cuh>
+// #include <mip/presolve/load_balanced_bounds_presolve_helpers.cuh>
 #include <mip/problem/problem.cuh>
 #include <raft/core/device_span.hpp>
 #include <raft/core/handle.hpp>
-#include <utilities/managed_stream_pool.cuh>
 #include <rmm/device_uvector.hpp>
+#include <utilities/managed_stream_pool.cuh>
 #include "spmv_functors.cuh"
 #include "spmv_kernels.cuh"
 
@@ -135,10 +135,10 @@ void spmv_sub_warp(managed_stream_pool& streams,
                    functor_t functor = identity_functor<i_t, f_t>(),
                    bool dry_run      = false)
 {
-  constexpr i_t block_dim         = 32;
-  auto items_per_block            = block_dim / threads_per_constraint;
-  auto item_id_beg = bin_offsets[ceil_log_2(degree_beg)];
-  auto item_id_end = bin_offsets[ceil_log_2(degree_end) + 1];
+  constexpr i_t block_dim = 32;
+  auto items_per_block    = block_dim / threads_per_constraint;
+  auto item_id_beg        = bin_offsets[ceil_log_2(degree_beg)];
+  auto item_id_end        = bin_offsets[ceil_log_2(degree_end) + 1];
 
   auto block_count = raft::ceildiv<i_t>(item_id_end - item_id_beg, items_per_block);
   if (block_count != 0) {
