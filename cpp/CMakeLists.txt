@@ -108,7 +108,7 @@ message("-- Building with logging level = ${LIBCUOPT_LOGGING_LEVEL}")
 message("-- Building for GPU_ARCHS = ${CMAKE_CUDA_ARCHITECTURES}")
 
 # make the flags global in order to propagate flags to test cmake files
-set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --expt-relaxed-constexpr --expt-extended-lambda --fmad=false")
+set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --expt-relaxed-constexpr --expt-extended-lambda")
 if(${CMAKE_CUDA_COMPILER_VERSION} VERSION_GREATER_EQUAL 12.8.0)
   set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -static-global-template-stub=false")
 endif()
@@ -170,6 +170,27 @@ add_subdirectory(src)
 add_library(cuopt SHARED
   ${CUOPT_SRC_FILES}
 )
+
+#set_source_files_properties(src/linear_programming/step_size_strategy/adaptive_step_size_strategy.cu  PROPERTIES COMPILE_OPTIONS "--fmad=false")
+#set_source_files_properties(src/linear_programming/pdlp.cu  PROPERTIES COMPILE_OPTIONS "--fmad=false")
+#set_source_files_properties(src/linear_programming/pdhg.cu  PROPERTIES COMPILE_OPTIONS "--fmad=false")
+#set_source_files_properties(src/linear_programming/spmv.cu  PROPERTIES COMPILE_OPTIONS "--fmad=false")
+
+set_source_files_properties(src/linear_programming/pdlp.cu  PROPERTIES COMPILE_OPTIONS "--fmad=false")
+set_source_files_properties(src/linear_programming/pdhg.cu  PROPERTIES COMPILE_OPTIONS "--fmad=false")
+set_source_files_properties(src/linear_programming/solver_solution.cu  PROPERTIES COMPILE_OPTIONS "--fmad=false")
+set_source_files_properties(src/linear_programming/saddle_point.cu  PROPERTIES COMPILE_OPTIONS "--fmad=false")
+set_source_files_properties(src/linear_programming/spmv.cu  PROPERTIES COMPILE_OPTIONS "--fmad=false")
+set_source_files_properties(src/linear_programming/cusparse_view.cu  PROPERTIES COMPILE_OPTIONS "--fmad=false")
+set_source_files_properties(src/linear_programming/pdlp_warm_start_data.cu  PROPERTIES COMPILE_OPTIONS "--fmad=false")
+set_source_files_properties(src/linear_programming/initial_scaling_strategy/initial_scaling.cu  PROPERTIES COMPILE_OPTIONS "--fmad=false")
+set_source_files_properties(src/linear_programming/step_size_strategy/adaptive_step_size_strategy.cu  PROPERTIES COMPILE_OPTIONS "--fmad=false")
+set_source_files_properties(src/linear_programming/restart_strategy/pdlp_restart_strategy.cu  PROPERTIES COMPILE_OPTIONS "--fmad=false")
+set_source_files_properties(src/linear_programming/restart_strategy/weighted_average_solution.cu  PROPERTIES COMPILE_OPTIONS "--fmad=false")
+set_source_files_properties(src/linear_programming/restart_strategy/localized_duality_gap_container.cu  PROPERTIES COMPILE_OPTIONS "--fmad=false")
+set_source_files_properties(src/linear_programming/termination_strategy/termination_strategy.cu  PROPERTIES COMPILE_OPTIONS "--fmad=false")
+set_source_files_properties(src/linear_programming/termination_strategy/infeasibility_information.cu  PROPERTIES COMPILE_OPTIONS "--fmad=false")
+set_source_files_properties(src/linear_programming/termination_strategy/convergence_information.cu  PROPERTIES COMPILE_OPTIONS "--fmad=false")
 
 set_target_properties(cuopt
   PROPERTIES BUILD_RPATH "\$ORIGIN"
