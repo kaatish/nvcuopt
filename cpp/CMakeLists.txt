@@ -366,6 +366,4 @@ if(BUILD_BENCHMARKS)
     cuopt
     OpenMP::OpenMP_CXX
   )
-  add_executable(run_benchmark ../benchmarks/linear_programming/cuopt/run_benchmark.cu)
-  target_link_libraries(run_benchmark cuopt ${CMAKE_CURRENT_BINARY_DIR}/libcuopt.so)
 endif()
