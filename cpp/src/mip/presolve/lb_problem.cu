@@ -15,6 +15,7 @@
  * limitations under the License.
  */
 
+#include <mip/mip_constants.hpp>
 #include "lb_problem.cuh"
 #include "lb_problem_setup.cuh"
 #include "load_balanced_partition_helpers.cuh"
@@ -22,7 +23,7 @@
 namespace cuopt::linear_programming::detail {
 
 template <typename i_t, typename f_t>
-lb_problem_t<i_t, f_t>::csr_data_t::csr_data_t(const problem_t<i_t, f_t>& problem, csr_type_t type_)
+lb_problem_t<i_t, f_t>::csr_data_t::csr_data_t(problem_t<i_t, f_t>& problem, csr_type_t type_)
   : type(type_),
     reorg_ids(0, problem.handle_ptr->get_stream()),
     coefficients(0, problem.handle_ptr->get_stream()),
@@ -32,26 +33,33 @@ lb_problem_t<i_t, f_t>::csr_data_t::csr_data_t(const problem_t<i_t, f_t>& proble
     warp_id_offsets(0, problem.handle_ptr->get_stream()),
     block_offsets(0, problem.handle_ptr->get_stream()),
     block_id_offsets(0, problem.handle_ptr->get_stream()),
+    heavy_block_segments(0, problem.handle_ptr->get_stream()),
+    heavy_vertex_ids(0, problem.handle_ptr->get_stream()),
+    heavy_pseudo_block_ids(0, problem.handle_ptr->get_stream()),
     binner(problem.handle_ptr)
 {
 }
 
 template <typename i_t, typename f_t>
-void lb_problem_t<i_t, f_t>::csr_data_t::setup(const problem_t<i_t, f_t>& problem,
-                                               i_t heavy_deg_cutoff)
+void lb_problem_t<i_t, f_t>::csr_data_t::setup(problem_t<i_t, f_t>& problem,
+                                               i_t heavy_deg_cutoff,
+                                               bool debug)
 {
   rows = (type == csr_type_t::CNST) ? problem.n_constraints : problem.n_variables;
   cols = (type == csr_type_t::VARS) ? problem.n_constraints : problem.n_variables;
+  nnz  = problem.nnz;
   reorg_ids.resize(rows, problem.handle_ptr->get_stream());
   coefficients.resize(nnz, problem.handle_ptr->get_stream());
-  col_elem.resize(cols, problem.handle_ptr->get_stream());
+  col_elem.resize(nnz, problem.handle_ptr->get_stream());
   offsets.resize(rows + 1, problem.handle_ptr->get_stream());
 
-  binner.setup(problem.offsets.data(), rows);
-  binner.run(reorg_ids, problem.handle_ptr);
-  bin_offsets = binner.bin_offsets_;
-
-  constexpr bool debug = true;
+  if (type == csr_type_t::CNST) {
+    binner.setup(problem.offsets.data(), rows);
+  } else {
+    binner.setup(problem.reverse_offsets.data(), rows);
+  }
+  auto dist   = binner.run(reorg_ids, problem.handle_ptr);
+  bin_offsets = dist.bin_offsets_;
 
   if (type == csr_type_t::CNST) {
     create_graph<i_t, f_t>(problem.handle_ptr,
@@ -98,7 +106,7 @@ void lb_problem_t<i_t, f_t>::csr_data_t::setup(const problem_t<i_t, f_t>& proble
 }
 
 template <typename i_t, typename f_t>
-lb_problem_t<i_t, f_t>::lb_problem_t(const problem_t<i_t, f_t>& problem)
+lb_problem_t<i_t, f_t>::lb_problem_t(problem_t<i_t, f_t>& problem)
   : pb(&problem),
     handle_ptr(problem.handle_ptr),
     cnst_csr(problem, csr_type_t::CNST),
@@ -110,10 +118,11 @@ lb_problem_t<i_t, f_t>::lb_problem_t(const problem_t<i_t, f_t>& problem)
     n_variables(problem.n_variables),
     nnz(problem.nnz)
 {
+  setup(problem);
 }
 
 template <typename i_t, typename f_t>
-void lb_problem_t<i_t, f_t>::setup(const problem_t<i_t, f_t>& problem)
+void lb_problem_t<i_t, f_t>::setup(problem_t<i_t, f_t>& problem)
 {
   handle_ptr = problem.handle_ptr;
   cnst_csr.setup(problem, heavy_degree_cutoff);
@@ -151,5 +160,13 @@ void lb_problem_t<i_t, f_t>::setup(const problem_t<i_t, f_t>& problem)
   n_variables   = problem.n_variables;
   nnz           = problem.nnz;
 }
+
+#if MIP_INSTANTIATE_FLOAT
+template class lb_problem_t<int, float>;
+#endif
+
+#if MIP_INSTANTIATE_DOUBLE
+template class lb_problem_t<int, double>;
+#endif
 
 }  // namespace cuopt::linear_programming::detail

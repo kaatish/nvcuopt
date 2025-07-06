@@ -31,13 +31,14 @@ enum class csr_type_t { CNST = 0, VARS = 1 };
 template <typename i_t, typename f_t>
 class lb_problem_t {
  public:
-  lb_problem_t(const problem_t<i_t, f_t>& problem);
-  void setup(const problem_t<i_t, f_t>& problem);
+  lb_problem_t(problem_t<i_t, f_t>& problem);
+  void setup(problem_t<i_t, f_t>& problem);
 
   struct csr_data_t {
     csr_type_t type;
     i_t rows;
     i_t cols;
+    i_t nnz;
     rmm::device_uvector<i_t> reorg_ids;
     rmm::device_uvector<f_t> coefficients;
     rmm::device_uvector<i_t> col_elem;
@@ -59,8 +60,8 @@ class lb_problem_t {
     vertex_bin_t<i_t> binner;
     std::vector<i_t> bin_offsets;
 
-    csr_data_t(const problem_t<i_t, f_t>& problem, csr_type_t type);
-    void setup(const problem_t<i_t, f_t>& problem, i_t heavy_deg_cutoff);
+    csr_data_t(problem_t<i_t, f_t>& problem, csr_type_t type);
+    void setup(problem_t<i_t, f_t>& problem, i_t heavy_deg_cutoff, bool debug = false);
   };
 
   const problem_t<i_t, f_t>* pb;
@@ -72,8 +73,8 @@ class lb_problem_t {
   rmm::device_uvector<f_t> vars_bnd;
   rmm::device_uvector<var_t> var_types;
 
-  i_t n_variables;
   i_t n_constraints;
+  i_t n_variables;
   i_t nnz;
 
   static constexpr i_t heavy_degree_cutoff = 16 * 1024;

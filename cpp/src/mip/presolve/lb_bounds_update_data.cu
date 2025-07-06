@@ -25,29 +25,37 @@
 namespace cuopt::linear_programming::detail {
 
 template <typename i_t, typename f_t>
-lb_bounds_update_data_t<i_t, f_t>::lb_bounds_update_data_t(const raft::handle_t* handle_ptr)
-  : bounds_changed(handle_ptr->get_stream()),
-    cnst_slack(0, handle_ptr->get_stream()),
-    vars_bnd(0, handle_ptr->get_stream()),
-    tmp_cnst_slack(0, handle_ptr->get_stream()),
-    tmp_vars_bnd(0, handle_ptr->get_stream()),
-    var_bounds_changed(0, handle_ptr->get_stream()),
-    changed_constraints(0, handle_ptr->get_stream()),
-    next_changed_constraints(0, handle_ptr->get_stream()),
-    changed_variables(0, handle_ptr->get_stream())
+lb_bounds_update_data_t<i_t, f_t>::lb_bounds_update_data_t(lb_problem_t<i_t, f_t>& problem)
+  : bounds_changed(problem.handle_ptr->get_stream()),
+    cnst_slack(0, problem.handle_ptr->get_stream()),
+    vars_bnd(0, problem.handle_ptr->get_stream()),
+    tmp_act(0, problem.handle_ptr->get_stream()),
+    tmp_vars_bnd(0, problem.handle_ptr->get_stream()),
+    var_bounds_changed(0, problem.handle_ptr->get_stream()),
+    changed_constraints(0, problem.handle_ptr->get_stream()),
+    next_changed_constraints(0, problem.handle_ptr->get_stream()),
+    changed_variables(0, problem.handle_ptr->get_stream())
 {
+  resize(problem);
 }
 
 template <typename i_t, typename f_t>
 void lb_bounds_update_data_t<i_t, f_t>::copy(lb_problem_t<i_t, f_t>& problem)
+{
+  // TODO : remove resize?
+  resize(problem);
+  raft::copy(
+    vars_bnd.data(), problem.vars_bnd.data(), vars_bnd.size(), problem.handle_ptr->get_stream());
+}
+
+template <typename i_t, typename f_t>
+void lb_bounds_update_data_t<i_t, f_t>::resize(lb_problem_t<i_t, f_t>& problem)
 {
   resize(problem.handle_ptr,
          problem.n_constraints,
          problem.n_variables,
          problem.cnst_csr.num_blocks_heavy,
          problem.vars_csr.num_blocks_heavy);
-  raft::copy(
-    vars_bnd.data(), problem.vars_bnd.data(), vars_bnd.size(), problem.handle_ptr->get_stream());
 }
 
 template <typename i_t, typename f_t>
@@ -58,7 +66,7 @@ void lb_bounds_update_data_t<i_t, f_t>::resize(const raft::handle_t* handle_ptr,
                                                i_t num_blocks_heavy_vars)
 {
   cnst_slack.resize(2 * n_constraints, handle_ptr->get_stream());
-  tmp_cnst_slack.resize(2 * num_blocks_heavy_cnst, handle_ptr->get_stream());
+  tmp_act.resize(2 * num_blocks_heavy_cnst, handle_ptr->get_stream());
   vars_bnd.resize(2 * n_variables, handle_ptr->get_stream());
   tmp_vars_bnd.resize(2 * num_blocks_heavy_vars, handle_ptr->get_stream());
 
@@ -75,8 +83,8 @@ typename lb_bounds_update_data_t<i_t, f_t>::view_t lb_bounds_update_data_t<i_t, 
   v.bounds_changed           = bounds_changed.data();
   v.cnst_slack               = make_span_2(cnst_slack);
   v.vars_bnd                 = make_span_2(vars_bnd);
-  v.tmp_cnst_slack           = make_span_2(cnst_slack);
-  v.tmp_vars_bnd             = make_span_2(vars_bnd);
+  v.tmp_act                  = make_span_2(tmp_act);
+  v.tmp_vars_bnd             = make_span_2(tmp_vars_bnd);
   v.var_bounds_changed       = make_span(var_bounds_changed);
   v.changed_constraints      = make_span(changed_constraints);
   v.next_changed_constraints = make_span(next_changed_constraints);

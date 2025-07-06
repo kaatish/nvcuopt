@@ -49,6 +49,26 @@ struct type_2<double> {
 };
 
 template <typename T>
+struct type_4 {
+  using type = void;
+};
+
+template <>
+struct type_4<int> {
+  using type = int4;
+};
+
+template <>
+struct type_4<float> {
+  using type = float4;
+};
+
+template <>
+struct type_4<double> {
+  using type = double4;
+};
+
+template <typename T>
 raft::device_span<typename type_2<T>::type> make_span_2(rmm::device_uvector<T>& container)
 {
   // TODO : ceildiv or throw assert

@@ -274,7 +274,7 @@ std::tuple<i_t, i_t> block_meta(rmm::cuda_stream_view stream,
     warp_offsets.push_back(warp_count + warp_offsets.back());
   }
 
-  if (false) {
+  if (true) {
     std::cout << "warp_offsets and id offsets\n";
     for (size_t i = 0; i < warp_offsets.size(); ++i) {
       std::cout << i << "\t";
@@ -311,7 +311,7 @@ std::tuple<i_t, i_t> block_meta(rmm::cuda_stream_view stream,
   block_offsets.push_back(block_offsets.back() + heavy_id_beg -
                           bin_offsets[std::log2(16 * 2 * w_t_r) + 3]);
 
-  if (false) {
+  if (true) {
     std::cout << "block_offsets\n";
     for (size_t i = 0; i < block_offsets.size(); ++i) {
       std::cout << i << " " << block_offsets[i] << "\n";

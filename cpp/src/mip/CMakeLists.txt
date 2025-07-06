@@ -37,6 +37,7 @@ list(PREPEND
   ${CMAKE_CURRENT_SOURCE_DIR}/presolve/bounds_update_data.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/presolve/lb_bounds_update_data.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/presolve/lb_problem.cu
+  ${CMAKE_CURRENT_SOURCE_DIR}/presolve/lb_multi_probe.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/presolve/conditional_bound_strengthening.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/presolve/lb_probing_cache.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/presolve/load_balanced_bounds_presolve.cu

@@ -29,7 +29,7 @@ struct lb_bounds_update_data_t {
   rmm::device_scalar<i_t> bounds_changed;
   rmm::device_uvector<f_t> cnst_slack;
   rmm::device_uvector<f_t> vars_bnd;
-  rmm::device_uvector<f_t> tmp_cnst_slack;
+  rmm::device_uvector<f_t> tmp_act;
   rmm::device_uvector<f_t> tmp_vars_bnd;
   rmm::device_uvector<i_t> var_bounds_changed;
   rmm::device_uvector<i_t> changed_constraints;
@@ -41,7 +41,7 @@ struct lb_bounds_update_data_t {
     i_t* bounds_changed;
     raft::device_span<f_t2> cnst_slack;
     raft::device_span<f_t2> vars_bnd;
-    raft::device_span<f_t2> tmp_cnst_slack;
+    raft::device_span<f_t2> tmp_act;
     raft::device_span<f_t2> tmp_vars_bnd;
     raft::device_span<i_t> var_bounds_changed;
     raft::device_span<i_t> changed_constraints;
@@ -49,8 +49,9 @@ struct lb_bounds_update_data_t {
     raft::device_span<i_t> changed_variables;
   };
 
-  lb_bounds_update_data_t(const raft::handle_t* handle);
+  lb_bounds_update_data_t(lb_problem_t<i_t, f_t>& problem);
   void copy(lb_problem_t<i_t, f_t>& problem);
+  void resize(lb_problem_t<i_t, f_t>& problem);
   void resize(const raft::handle_t* handle_ptr,
               i_t n_constraints,
               i_t n_variables,
