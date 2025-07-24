@@ -199,6 +199,8 @@ std::tuple<i_t, i_t> create_heavy_item_block_segments(rmm::cuda_stream_view stre
                          item_block_segments.begin() + 1);
   auto num_blocks = item_block_segments.back_element(stream);
   if (num_blocks > 0) {
+    std::cout << "heavy_id_beg " << heavy_id_beg << " heavy_id_count " << heavy_id_count
+              << " num_blocks " << num_blocks << "\n";
     vertex_id.resize(num_blocks, stream);
     pseudo_block_id.resize(num_blocks, stream);
     thrust::fill(rmm::exec_policy(stream), vertex_id.begin(), vertex_id.end(), i_t{-1});
@@ -243,17 +245,29 @@ std::tuple<i_t, i_t> create_heavy_item_block_segments(rmm::cuda_stream_view stre
 }
 
 template <typename i_t>
-std::tuple<i_t, i_t> block_meta(rmm::cuda_stream_view stream,
-                                i_t heavy_id_beg,
-                                rmm::device_uvector<i_t>& d_warp_offsets,
-                                rmm::device_uvector<i_t>& d_warp_id_offsets,
-                                rmm::device_uvector<i_t>& d_block_offsets,
-                                rmm::device_uvector<i_t>& d_block_id_offsets,
-                                const std::vector<i_t>& bin_offsets,
-                                i_t w_t_r,
-                                i_t heavy_w_cut_off,
-                                bool debug = false)
+std::tuple<i_t, i_t, i_t> block_meta(rmm::cuda_stream_view stream,
+                                     i_t heavy_id_beg,
+                                     rmm::device_uvector<i_t>& d_warp_offsets,
+                                     rmm::device_uvector<i_t>& d_warp_id_offsets,
+                                     rmm::device_uvector<i_t>& d_block_offsets,
+                                     rmm::device_uvector<i_t>& d_block_id_offsets,
+                                     const std::vector<i_t>& bin_offsets,
+                                     i_t w_t_r,
+                                     i_t heavy_w_cut_off,
+                                     bool debug = false)
 {
+  std::cout << "bin_offsets\n";
+  for (size_t i = 0; i < bin_offsets.size(); ++i) {
+    if (i > 0 && i < 20) {
+      std::cout << std::pow(2, i - 1) << "\t[2^" << i - 1 << " 2^" << i << ")" << "\t\t"
+                << bin_offsets[i] << "\n";
+    } else if (i > 0) {
+      std::cout << "[2^" << i - 1 << " 2^" << i << ")" << "\t\t" << bin_offsets[i] << "\n";
+    } else {
+      std::cout << i << " " << bin_offsets[i] << "\n";
+    }
+  }
+  std::cout << "\n";
   i_t block_size = 256;
 
   std::vector<i_t> warp_offsets;
@@ -262,6 +276,8 @@ std::tuple<i_t, i_t> block_meta(rmm::cuda_stream_view stream,
   warp_id_offsets.reserve(32);
 
   for (i_t t_p_v = 1; t_p_v <= 16 * 2; t_p_v *= 2) {
+    // std::cout<<t_p_v<<" "<<w_t_r<<" std::log2(t_p_v * w_t_r) + 1 "<<std::log2(t_p_v * w_t_r) +
+    // 1<<" "<<bin_offsets[std::log2(t_p_v * w_t_r) + 1]<<"\n";
     warp_id_offsets.push_back(bin_offsets[std::log2(t_p_v * w_t_r) + 1]);
   }
 
@@ -296,20 +312,34 @@ std::tuple<i_t, i_t> block_meta(rmm::cuda_stream_view stream,
   //[128, 256]
   std::vector<i_t> block_id_offsets;
   std::vector<i_t> block_offsets;
-  block_id_offsets.push_back(bin_offsets[std::log2(16 * 2 * w_t_r) + 1]);
-  block_offsets.push_back(num_sub_warp_blocks);
+  block_offsets.push_back(0);
+  for (i_t t_p_v = 32; t_p_v <= block_size * 2; t_p_v *= 2) {
+    block_id_offsets.push_back(bin_offsets[std::log2(t_p_v * w_t_r) + 1]);
+  }
+  i_t t_p_v = 32;
+  std::cout << "t_p_v" << " " << "num_items" << " " << "items_per_block" << " "
+            << "num_complete_blocks" << "\n";
+  for (size_t i = 0; i < block_id_offsets.size() - 1; ++i) {
+    auto num_items           = block_id_offsets[i + 1] - block_id_offsets[i];
+    auto items_per_block     = raft::ceildiv(block_size, t_p_v);
+    auto num_complete_blocks = raft::ceildiv(num_items, items_per_block);
+    std::cout << t_p_v << " " << num_items << " " << items_per_block << " " << num_complete_blocks
+              << "\n";
+    block_offsets.push_back(block_offsets.back() + num_complete_blocks);
+    t_p_v *= 2;
+  }
 
-  block_id_offsets.push_back(bin_offsets[std::log2(16 * 2 * w_t_r) + 3]);
-  block_offsets.push_back(block_offsets.back() +
-                          raft::ceildiv(bin_offsets[std::log2(16 * 2 * w_t_r) + 3] -
-                                          bin_offsets[std::log2(16 * 2 * w_t_r) + 1],
-                                        block_size / 64));
+  // block_id_offsets.push_back(bin_offsets[std::log2(16 * 2 * w_t_r) + 3]);
+  // block_offsets.push_back(block_offsets.back() +
+  //                         raft::ceildiv(bin_offsets[std::log2(16 * 2 * w_t_r) + 3] -
+  //                                         bin_offsets[std::log2(16 * 2 * w_t_r) + 1],
+  //                                       block_size / 64));
 
-  //[512, heavy_degree_cutoff/2]
-  // auto heavy_id_beg = bin_offsets[std::log2(heavy_w_cut_off) + 1];
-  block_id_offsets.push_back(heavy_id_beg);
-  block_offsets.push_back(block_offsets.back() + heavy_id_beg -
-                          bin_offsets[std::log2(16 * 2 * w_t_r) + 3]);
+  ////[512, heavy_degree_cutoff/2]
+  //// auto heavy_id_beg = bin_offsets[std::log2(heavy_w_cut_off) + 1];
+  // block_id_offsets.push_back(heavy_id_beg);
+  // block_offsets.push_back(block_offsets.back() + heavy_id_beg -
+  //                         bin_offsets[std::log2(16 * 2 * w_t_r) + 3]);
 
   if (true) {
     std::cout << "block_offsets\n";
@@ -332,7 +362,7 @@ std::tuple<i_t, i_t> block_meta(rmm::cuda_stream_view stream,
   expand_device_copy(d_warp_id_offsets, warp_id_offsets, stream);
   expand_device_copy(d_block_offsets, block_offsets, stream);
   expand_device_copy(d_block_id_offsets, block_id_offsets, stream);
-  return std::make_tuple(num_sub_warps, block_offsets.back());
+  return std::make_tuple(num_sub_warps, num_sub_warp_blocks, block_offsets.back());
 }
 
 }  // namespace cuopt::linear_programming::detail

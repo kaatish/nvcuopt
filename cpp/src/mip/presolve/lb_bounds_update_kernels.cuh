@@ -17,41 +17,42 @@
 
 #pragma once
 
+#include <mip/utils.cuh>
 #include <raft/core/device_span.hpp>
 #include <utilities/lb_common_kernels.cuh>
 
 namespace cuopt::linear_programming::detail {
 
-template <typename i_t, typename f_t, i_t BDIM, typename view_t, typename update_view_t>
-__global__ void cnst_slack_kernel(view_t view,
-                                  update_view_t upd0,
-                                  update_view_t upd1,
-                                  i_t sub_warp_count,
-                                  i_t sub_warp_blocks_end,
-                                  i_t med_blocks_end,
-                                  raft::device_span<const i_t> warp_offsets,
-                                  raft::device_span<const i_t> warp_id_offsets,
-                                  raft::device_span<const i_t> block_offsets,
-                                  raft::device_span<const i_t> block_id_offsets)
-{
-  if (blockIdx.x < sub_warp_blocks_end) {
-    // sub warps
-    cnst_slack_sub_warp<i_t, f_t, BDIM>(
-      view, upd0, upd1, view.warp_offsets, view.warp_id_offsets, view.sub_warp_count);
-  } else if (blockIdx.x < block_offsets[1]) {
-    // medium blocks - 64 threads per row
-    cnst_slack_block_64<i_t, f_t, BDIM>(blockIdx.x - block_offsets[0],  // pseudo block id
-                                        block_id_offsets[0],            // beginning of segment
-                                        block_id_offsets[1],            // end of segment
-                                        view,
-                                        upd0,
-                                        upd1);
-  } else if (blockIdx.x < block_offsets[2]) {
-    // medium blocks - 256 (BDIM) threads per row
-    cnst_slack_block<i_t, f_t, BDIM>(
-      blockIdx.x - block_offsets[1], block_id_offsets[1], view, upd0, upd1);
-  }
-}
+// template <typename i_t, typename f_t, i_t BDIM, typename view_t, typename update_view_t>
+//__global__ void cnst_slack_kernel(view_t view,
+//                                   update_view_t upd0,
+//                                   update_view_t upd1,
+//                                   i_t sub_warp_count,
+//                                   i_t sub_warp_blocks_end,
+//                                   i_t med_blocks_end,
+//                                   raft::device_span<const i_t> warp_offsets,
+//                                   raft::device_span<const i_t> warp_id_offsets,
+//                                   raft::device_span<const i_t> block_offsets,
+//                                   raft::device_span<const i_t> block_id_offsets)
+//{
+//   if (blockIdx.x < sub_warp_blocks_end) {
+//     // sub warps
+//     cnst_slack_sub_warp<i_t, f_t, BDIM>(
+//       view, upd0, upd1, view.warp_offsets, view.warp_id_offsets, view.sub_warp_count);
+//   } else if (blockIdx.x < block_offsets[1]) {
+//     // medium blocks - 64 threads per row
+//     cnst_slack_block_64<i_t, f_t, BDIM>(blockIdx.x - block_offsets[0],  // pseudo block id
+//                                         block_id_offsets[0],            // beginning of segment
+//                                         block_id_offsets[1],            // end of segment
+//                                         view,
+//                                         upd0,
+//                                         upd1);
+//   } else if (blockIdx.x < block_offsets[2]) {
+//     // medium blocks - 256 (BDIM) threads per row
+//     cnst_slack_block<i_t, f_t, BDIM>(
+//       blockIdx.x - block_offsets[1], block_id_offsets[1], view, upd0, upd1);
+//   }
+// }
 
 template <typename i_t, typename upd_view_t>
 inline __device__ thrust::pair<bool, bool> skip_cnst(upd_view_t upd_0,
@@ -79,6 +80,86 @@ inline __device__ bool get_valid(thrust::pair<bool, bool>& skip_flag,
 {
   return !thrust::get<0>(skip_flag) && !thrust::get<1>(skip_flag);
 }
+
+template <typename f_t, int MAX_EDGE_PER_CNST>
+struct warp_reduce_t {
+  using f_t2        = typename type_2<f_t>::type;
+  using warp_reduce = cub::WarpReduce<f_t, MAX_EDGE_PER_CNST>;
+  using storage_t   = typename warp_reduce::TempStorage[4];
+
+  storage_t& temp_storage;
+
+  __device__ warp_reduce_t(storage_t& storage_) : temp_storage(storage_) {}
+
+  inline __device__ thrust::pair<f_t2, f_t2> sum(thrust::pair<f_t2, f_t2>& in)
+  {
+    f_t2 out0, out1;
+    out0.x = warp_reduce(temp_storage[0]).Sum(thrust::get<0>(in).x);
+    out0.y = warp_reduce(temp_storage[1]).Sum(thrust::get<0>(in).y);
+    out1.x = warp_reduce(temp_storage[2]).Sum(thrust::get<1>(in).x);
+    out1.y = warp_reduce(temp_storage[3]).Sum(thrust::get<1>(in).y);
+    return thrust::make_pair(out0, out1);
+  }
+
+  inline __device__ thrust::pair<f_t2, f_t2> sum(thrust::pair<f_t2, f_t2>& in, int valid_items)
+  {
+    f_t2 out0, out1;
+    out0.x = warp_reduce(temp_storage[0]).Sum(thrust::get<0>(in).x, valid_items);
+    out0.y = warp_reduce(temp_storage[1]).Sum(thrust::get<0>(in).y, valid_items);
+    out1.x = warp_reduce(temp_storage[2]).Sum(thrust::get<1>(in).x, valid_items);
+    out1.y = warp_reduce(temp_storage[3]).Sum(thrust::get<1>(in).y, valid_items);
+    return thrust::make_pair(out0, out1);
+  }
+
+  inline __device__ f_t2 sum(f_t2& in)
+  {
+    f_t2 out;
+    out.x = warp_reduce(temp_storage[0]).Sum(in.x);
+    out.y = warp_reduce(temp_storage[1]).Sum(in.y);
+    return out;
+  }
+
+  inline __device__ f_t2 sum(f_t2& in, int valid_items)
+  {
+    f_t2 out;
+    out.x = warp_reduce(temp_storage[0]).Sum(in.x, valid_items);
+    out.y = warp_reduce(temp_storage[1]).Sum(in.y, valid_items);
+    return out;
+  }
+};
+
+template <typename f_t, int BDIM>
+struct block_reduce_t {
+  using f_t2         = typename type_2<f_t>::type;
+  using block_reduce = cub::BlockReduce<f_t, BDIM>;
+  using storage_t    = typename block_reduce::TempStorage;
+
+  storage_t& temp_storage;
+
+  __device__ block_reduce_t(storage_t& storage_) : temp_storage(storage_) {}
+
+  inline __device__ f_t2 sum(f_t2& in)
+  {
+    f_t2 out;
+    out.x = block_reduce(temp_storage).Sum(in.x);
+    __syncthreads();
+    out.y = block_reduce(temp_storage).Sum(in.y);
+    return out;
+  }
+
+  inline __device__ thrust::pair<f_t2, f_t2> sum(thrust::pair<f_t2, f_t2>& in)
+  {
+    f_t2 out0, out1;
+    out0.x = block_reduce(temp_storage).Sum(thrust::get<0>(in).x);
+    __syncthreads();
+    out0.y = block_reduce(temp_storage).Sum(thrust::get<0>(in).y);
+    __syncthreads();
+    out1.x = block_reduce(temp_storage).Sum(thrust::get<1>(in).x);
+    __syncthreads();
+    out1.y = block_reduce(temp_storage).Sum(thrust::get<1>(in).y);
+    return thrust::make_pair(out0, out1);
+  }
+};
 
 template <typename f_t, int BDIM, int PSEUDO_BDIM>
 struct partial_block_reduce_t {
@@ -162,88 +243,8 @@ struct partial_block_reduce_t {
   }
 };
 
-template <typename f_t, int MAX_EDGE_PER_CNST>
-struct warp_reduce_t {
-  using f_t2        = typename type_2<f_t>::type;
-  using warp_reduce = cub::WarpReduce<f_t, MAX_EDGE_PER_CNST>;
-  using storage_t   = typename warp_reduce::TempStorage[4];
-
-  storage_t& temp_storage;
-
-  __device__ warp_reduce_t(storage_t& storage_) : temp_storage(storage_) {}
-
-  inline __device__ thrust::pair<f_t2, f_t2> sum(thrust::pair<f_t2, f_t2>& in)
-  {
-    f_t2 out0, out1;
-    out0.x = warp_reduce(temp_storage[0]).Sum(thrust::get<0>(in).x);
-    out0.y = warp_reduce(temp_storage[1]).Sum(thrust::get<0>(in).y);
-    out1.x = warp_reduce(temp_storage[2]).Sum(thrust::get<1>(in).x);
-    out1.y = warp_reduce(temp_storage[3]).Sum(thrust::get<1>(in).y);
-    return thrust::make_pair(out0, out1);
-  }
-
-  inline __device__ thrust::pair<f_t2, f_t2> sum(thrust::pair<f_t2, f_t2>& in, int valid_items)
-  {
-    f_t2 out0, out1;
-    out0.x = warp_reduce(temp_storage[0]).Sum(thrust::get<0>(in).x, valid_item);
-    out0.y = warp_reduce(temp_storage[1]).Sum(thrust::get<0>(in).y, valid_item);
-    out1.x = warp_reduce(temp_storage[2]).Sum(thrust::get<1>(in).x, valid_item);
-    out1.y = warp_reduce(temp_storage[3]).Sum(thrust::get<1>(in).y, valid_item);
-    return thrust::make_pair(out0, out1);
-  }
-
-  inline __device__ f_t2 sum(f_t2& in)
-  {
-    f_t2 out;
-    out.x = warp_reduce(temp_storage[0]).Sum(in.x);
-    out.y = warp_reduce(temp_storage[1]).Sum(in.y);
-    return out;
-  }
-
-  inline __device__ f_t2 sum(f_t2& in, int valid_items)
-  {
-    f_t2 out;
-    out.x = warp_reduce(temp_storage[0]).Sum(in.x, valid_item);
-    out.y = warp_reduce(temp_storage[1]).Sum(in.y, valid_item);
-    return out;
-  }
-};
-
-template <typename f_t, i_t BDIM>
-struct block_reduce_t {
-  using f_t2         = typename type_2<f_t>::type;
-  using block_reduce = cub::BlockReduce<f_t, BDIM>;
-  using storage_t    = typename block_reduce::TempStorage;
-
-  storage_t& temp_storage;
-
-  __device__ block_reduce_t(storage_t& storage_) : temp_storage(storage_) {}
-
-  inline __device__ f_t2 sum(f_t2& in)
-  {
-    f_t2 out;
-    out.x = block_reduce(temp_storage).Sum(in.x);
-    __syncthreads();
-    out.y = block_reduce(temp_storage).Sum(in.y);
-    return out;
-  }
-
-  inline __device__ thrust::pair<f_t2, f_t2> sum(thrust::pair<f_t2, f_t2>& in)
-  {
-    f_t2 out0, out1;
-    out0.x = block_reduce(temp_storage).Sum(thrust::get<0>(in).x);
-    __syncthreads();
-    out0.y = block_reduce(temp_storage).Sum(thrust::get<0>(in).y);
-    __syncthreads();
-    out1.x = block_reduce(temp_storage).Sum(thrust::get<1>(in).x);
-    __syncthreads();
-    out1.y = block_reduce(temp_storage).Sum(thrust::get<1>(in).y);
-    return thrust::make_pair(out0, out1);
-  }
-};
-
 template <typename f_t,
-          i_t MAX_EDGE_PER_CNST,
+          int MAX_EDGE_PER_CNST,
           typename i_t,
           typename csr_view_t,
           typename upd_view_t>
@@ -253,8 +254,8 @@ __device__ typename type_2<f_t>::type calc_act(
   using f_t2 = typename type_2<f_t>::type;
   auto act   = f_t2{0., 0.};
   for (i_t i = tid + beg; i < end; i += MAX_EDGE_PER_CNST) {
-    auto coeff = view.coeff[i];
-    auto var   = view.vars[i];
+    auto coeff = view.coefficients[i];
+    auto var   = view.col_elem[i];
 
     atomicExch(&upd.changed_variables[var], 1);
 
@@ -272,7 +273,7 @@ __device__ typename type_2<f_t>::type calc_act(
 }
 
 template <typename f_t,
-          i_t MAX_EDGE_PER_CNST,
+          int MAX_EDGE_PER_CNST,
           typename i_t,
           typename csr_view_t,
           typename upd_view_t>
@@ -283,8 +284,8 @@ __device__ thrust::pair<typename type_2<f_t>::type, typename type_2<f_t>::type> 
   auto act_0 = f_t2{0., 0.};
   auto act_1 = f_t2{0., 0.};
   for (i_t i = tid + beg; i < end; i += MAX_EDGE_PER_CNST) {
-    auto coeff = view.coeff[i];
-    auto var   = view.vars[i];
+    auto coeff = view.coefficients[i];
+    auto var   = view.col_elem[i];
 
     atomicExch(&upd_0.changed_variables[var], 1);
     atomicExch(&upd_1.changed_variables[var], 1);
@@ -322,9 +323,13 @@ inline __device__ void write_cnst_slack(
   view.cnst_slack[cnst_idx] = cnst_prop;
 }
 
-template <typename f_t, i_t BDIM, typename i_t, typename csr_view_t, typename upd_view_t>
-__device__ void cnst_heavy(
-  i_t id_block_beg, i_t id_range_end, i_t work_per_block, upd_view_t upd0, upd_view_t upd1)
+template <typename f_t, int BDIM, typename i_t, typename csr_view_t, typename upd_view_t>
+__device__ void cnst_heavy(i_t id_block_beg,
+                           i_t id_range_end,
+                           i_t work_per_block,
+                           csr_view_t view,
+                           upd_view_t upd0,
+                           upd_view_t upd1)
 {
   auto idx       = view.heavy_vertex_ids[blockIdx.x - id_block_beg] + view.heavy_beg_id;
   auto cnst_idx  = view.reorg_ids[idx];
@@ -342,7 +347,7 @@ __device__ void cnst_heavy(
   block_reduce_t<f_t, BDIM> reduce(storage);
 
   if (both_valid(skip_calc)) {
-    auto act = calc_act<i_t, f_t, BDIM>(view, upd0, upd1, threadIdx.x, item_off_beg, item_off_end);
+    auto act = calc_act<f_t, BDIM>(view, upd0, upd1, threadIdx.x, item_off_beg, item_off_end);
     reduce.sum(act);
     if (threadIdx.x == 0) {
       upd0.tmp_act[blockIdx.x] = thrust::get<0>(act);
@@ -350,13 +355,18 @@ __device__ void cnst_heavy(
     }
   } else {
     auto& upd = get_valid(skip_calc, upd0, upd1);
-    auto act  = calc_act<i_t, f_t, BDIM>(view, upd, threadIdx.x, item_off_beg, item_off_end);
+    auto act  = calc_act<f_t, BDIM>(view, upd, threadIdx.x, item_off_beg, item_off_end);
     reduce.sum(act);
     if (threadIdx.x == 0) { upd.tmp_act[blockIdx.x] = act; }
   }
 }
 
-template <typename f_t, i_t BDIM, typename i_t, typename csr_view_t, typename upd_view_t>
+template <bool erase_inf_cnst,
+          typename f_t,
+          int BDIM,
+          typename i_t,
+          typename csr_view_t,
+          typename upd_view_t>
 __global__ void finalize_cnst_heavy(csr_view_t view, upd_view_t upd0, upd_view_t upd1)
 {
   using f_t2 = typename type_2<f_t>::type;
@@ -412,9 +422,10 @@ __global__ void finalize_cnst_heavy(csr_view_t view, upd_view_t upd0, upd_view_t
   }
 }
 
-template <typename f_t,
-          i_t BDIM,
-          i_t MAX_EDGE_PER_CNST,
+template <bool erase_inf_cnst,
+          typename f_t,
+          int BDIM,
+          int MAX_EDGE_PER_CNST,
           typename i_t,
           typename csr_view_t,
           typename upd_view_t>
@@ -461,32 +472,32 @@ __device__ void cnst_sub_warp(
   if (valid_item && both_valid(skip_calc)) {
     i_t item_off_beg = view.offsets[idx];
     i_t item_off_end = view.offsets[idx + 1];
-    act = calc_act<i_t, f_t, MAX_EDGE_PER_CNST>(view, upd0, upd1, p_id, item_off_beg, item_off_end);
+    act = calc_act<f_t, MAX_EDGE_PER_CNST>(view, upd0, upd1, p_tid, item_off_beg, item_off_end);
   } else if (valid_item) {
     i_t item_off_beg = view.offsets[idx];
     i_t item_off_end = view.offsets[idx + 1];
     if (thrust::get<0>(skip_calc)) {
       thrust::get<1>(act) =
-        calc_act<i_t, f_t, MAX_EDGE_PER_CNST>(view, upd1, p_id, item_off_beg, item_off_end);
+        calc_act<f_t, MAX_EDGE_PER_CNST>(view, upd1, p_tid, item_off_beg, item_off_end);
     } else {
       thrust::get<0>(act) =
-        calc_act<i_t, f_t, MAX_EDGE_PER_CNST>(view, upd0, p_id, item_off_beg, item_off_end);
+        calc_act<f_t, MAX_EDGE_PER_CNST>(view, upd0, p_tid, item_off_beg, item_off_end);
     }
   }
 
   act = reduce.sum(act);
 
   if (valid_item && head_flag && !thrust::get<0>(skip_calc)) {
-    write_cnst_slack<erase_inf_cnst>(upd0, cnst_idx, cnst_lb_ub, act, eps);
+    write_cnst_slack<erase_inf_cnst>(upd0, cnst_idx, cnst_lb_ub, thrust::get<0>(act), eps);
   }
   if (valid_item && head_flag && !thrust::get<1>(skip_calc)) {
-    write_cnst_slack<erase_inf_cnst>(upd1, cnst_idx, cnst_lb_ub, act, eps);
+    write_cnst_slack<erase_inf_cnst>(upd1, cnst_idx, cnst_lb_ub, thrust::get<1>(act), eps);
   }
 }
 
-template <typename f_t,
-          i_t BDIM,
-          i_t MAX_EDGE_PER_CNST,
+template <bool erase_inf_cnst,
+          typename f_t,
+          int BDIM,
           typename i_t,
           typename csr_view_t,
           typename upd_view_t>
@@ -530,27 +541,29 @@ __device__ void cnst_warp(
   if (valid_item && both_valid(skip_calc)) {
     i_t item_off_beg = view.offsets[idx];
     i_t item_off_end = view.offsets[idx + 1];
-    act              = calc_act<i_t, f_t, 32>(view, upd0, upd1, p_id, item_off_beg, item_off_end);
+    act              = calc_act<f_t, 32>(view, upd0, upd1, p_tid, item_off_beg, item_off_end);
   } else if (valid_item) {
     i_t item_off_beg = view.offsets[idx];
     i_t item_off_end = view.offsets[idx + 1];
     if (thrust::get<0>(skip_calc)) {
-      thrust::get<1>(act) = calc_act<i_t, f_t, 32>(view, upd1, p_id, item_off_beg, item_off_end);
+      thrust::get<1>(act) = calc_act<f_t, 32>(view, upd1, p_tid, item_off_beg, item_off_end);
     } else {
-      thrust::get<0>(act) = calc_act<i_t, f_t, 32>(view, upd0, p_id, item_off_beg, item_off_end);
+      thrust::get<0>(act) = calc_act<f_t, 32>(view, upd0, p_tid, item_off_beg, item_off_end);
     }
   }
 
-  act = warp_reduce.sum(act);
+  act = reduce.sum(act);
 
   if (valid_item && head_flag) {
-    write_cnst_slack<erase_inf_cnst>(view, cnst_idx, cnst_lb_ub, act, eps);
+    write_cnst_slack<erase_inf_cnst>(upd0, cnst_idx, cnst_lb_ub, thrust::get<0>(act), eps);
+    write_cnst_slack<erase_inf_cnst>(upd1, cnst_idx, cnst_lb_ub, thrust::get<1>(act), eps);
   }
 }
 
-template <typename f_t,
-          i_t BDIM,
-          i_t PSEUDO_BDIM,
+template <bool erase_inf_cnst,
+          typename f_t,
+          int BDIM,
+          int PSEUDO_BDIM,
           typename i_t,
           typename csr_view_t,
           typename upd_view_t>
@@ -591,7 +604,7 @@ __device__ void cnst_block(
 
   auto act = thrust::make_pair(f_t2{0., 0.}, f_t2{0., 0.});
   if (valid_item && both_valid(skip_calc)) {
-    auto act = calc_act<i_t, f_t, PSEUDO_BDIM>(
+    auto act = calc_act<f_t, PSEUDO_BDIM>(
       view, upd0, upd1, reduce.pseudo_thread_id(), item_off_beg, item_off_end);
     act = reduce.sum(act);
     if (reduce.is_aggregated_thread()) {
@@ -600,8 +613,8 @@ __device__ void cnst_block(
     }
   } else if (valid_item) {
     auto& upd = get_valid(skip_calc, upd0, upd1);
-    auto act  = calc_act<i_t, f_t, PSEUDO_BDIM>(
-      view, upd1, reduce.pseudo_thread_id(), item_off_beg, item_off_end);
+    auto act =
+      calc_act<f_t, PSEUDO_BDIM>(view, upd, reduce.pseudo_thread_id(), item_off_beg, item_off_end);
     act = reduce.sum(act);
     if (reduce.is_aggregated_thread()) {
       write_cnst_slack<erase_inf_cnst>(upd, cnst_idx, cnst_lb_ub, act, eps);
@@ -609,7 +622,12 @@ __device__ void cnst_block(
   }
 }
 
-template <typename f_t, i_t BDIM, typename i_t, typename csr_view_t, typename upd_view_t>
+template <bool erase_inf_cnst,
+          typename i_t,
+          typename f_t,
+          int BDIM,
+          typename csr_view_t,
+          typename upd_view_t>
 __device__ void call_cnst_sub_warp(csr_view_t view, upd_view_t upd0, upd_view_t upd1)
 {
   i_t id_warp_beg, id_range_end, t_p_v;
@@ -621,19 +639,24 @@ __device__ void call_cnst_sub_warp(csr_view_t view, upd_view_t upd0, upd_view_t 
                         view.sub_warp_count);
 
   if (t_p_v == 1) {
-    cnst_sub_warp<f_t, BDIM, 1>(id_warp_beg, id_range_end, view, upd0, upd1);
+    cnst_sub_warp<erase_inf_cnst, f_t, BDIM, 1>(id_warp_beg, id_range_end, view, upd0, upd1);
   } else if (t_p_v == 2) {
-    cnst_sub_warp<f_t, BDIM, 2>(id_warp_beg, id_range_end, view, upd0, upd1);
+    cnst_sub_warp<erase_inf_cnst, f_t, BDIM, 2>(id_warp_beg, id_range_end, view, upd0, upd1);
   } else if (t_p_v == 4) {
-    cnst_sub_warp<f_t, BDIM, 4>(id_warp_beg, id_range_end, view, upd0, upd1);
+    cnst_sub_warp<erase_inf_cnst, f_t, BDIM, 4>(id_warp_beg, id_range_end, view, upd0, upd1);
   } else if (t_p_v == 8) {
-    cnst_sub_warp<f_t, BDIM, 8>(id_warp_beg, id_range_end, view, upd0, upd1);
+    cnst_sub_warp<erase_inf_cnst, f_t, BDIM, 8>(id_warp_beg, id_range_end, view, upd0, upd1);
   } else if (t_p_v == 16) {
-    cnst_sub_warp<f_t, BDIM, 16>(id_warp_beg, id_range_end, view, upd0, upd1);
+    cnst_sub_warp<erase_inf_cnst, f_t, BDIM, 16>(id_warp_beg, id_range_end, view, upd0, upd1);
   }
 }
 
-template <typename f_t, i_t BDIM, typename i_t, typename csr_view_t, typename upd_view_t>
+template <bool erase_inf_cnst,
+          typename i_t,
+          typename f_t,
+          int BDIM,
+          typename csr_view_t,
+          typename upd_view_t>
 __device__ void call_cnst_block(csr_view_t view, upd_view_t upd0, upd_view_t upd1)
 {
   i_t id_block_beg, id_block_end, t_p_v;
@@ -642,18 +665,35 @@ __device__ void call_cnst_block(csr_view_t view, upd_view_t upd0, upd_view_t upd
                      &t_p_v,
                      view.block_offsets,
                      view.block_id_offsets,
-                     view.block_count);
+                     view.sub_warp_block_count,
+                     view.med_block_count);
 
   if (t_p_v == 32) {
-    cnst_warp<f_t, BDIM>(id_block_beg, id_block_end, view, upd0, upd1);
+    cnst_warp<erase_inf_cnst, f_t, BDIM>(id_block_beg, id_block_end, view, upd0, upd1);
   } else if (t_p_v == 64) {
-    cnst_block<f_t, BDIM, 64>(id_block_beg, id_block_end, view, upd0, upd1);
+    cnst_block<erase_inf_cnst, f_t, BDIM, 64>(id_block_beg, id_block_end, view, upd0, upd1);
   } else if (t_p_v == 128) {
-    cnst_block<f_t, BDIM, 128>(id_block_beg, id_block_end, view, upd0, upd1);
+    cnst_block<erase_inf_cnst, f_t, BDIM, 128>(id_block_beg, id_block_end, view, upd0, upd1);
   } else if (t_p_v == 256) {
-    cnst_block<f_t, BDIM, 256>(id_block_beg, id_block_end, view, upd0, upd1);
+    cnst_block<erase_inf_cnst, f_t, BDIM, 256>(id_block_beg, id_block_end, view, upd0, upd1);
   } else {
-    cnst_heavy<f_t, BDIM>(id_block_beg, id_block_end, work_per_block, view, upd0, upd1);
+    cnst_heavy<f_t, BDIM>(id_block_beg, id_block_end, view.work_per_block, view, upd0, upd1);
+  }
+}
+
+// TODO : call_constraint_slack_kernel
+template <bool erase_inf_cnst,
+          typename i_t,
+          typename f_t,
+          int BDIM,
+          typename csr_view_t,
+          typename upd_view_t>
+__global__ void call_cnst_slack(csr_view_t view, upd_view_t upd0, upd_view_t upd1)
+{
+  if (blockIdx.x < view.sub_warp_block_count) {
+    call_cnst_sub_warp<erase_inf_cnst, i_t, f_t, BDIM>(view, upd0, upd1);
+  } else {
+    call_cnst_block<erase_inf_cnst, i_t, f_t, BDIM>(view, upd0, upd1);
   }
 }
 

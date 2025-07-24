@@ -29,6 +29,37 @@ namespace cuopt::linear_programming::detail {
 enum class csr_type_t { CNST = 0, VARS = 1 };
 
 template <typename i_t, typename f_t>
+struct csr_data_view_t {
+  using f_t2 = typename type_2<f_t>::type;
+  raft::device_span<i_t> reorg_ids;
+  raft::device_span<f_t> coefficients;
+  raft::device_span<i_t> col_elem;
+  raft::device_span<i_t> offsets;
+
+  i_t heavy_beg_id;
+  i_t sub_warp_count;
+  i_t sub_warp_block_count;
+  i_t med_block_count;
+  raft::device_span<i_t> warp_offsets;
+  raft::device_span<i_t> warp_id_offsets;
+  raft::device_span<i_t> block_offsets;
+  raft::device_span<i_t> block_id_offsets;
+
+  i_t num_blocks_heavy;
+  raft::device_span<i_t> heavy_block_segments;
+  raft::device_span<i_t> heavy_vertex_ids;
+  raft::device_span<i_t> heavy_pseudo_block_ids;
+
+  raft::device_span<f_t2> cnst_bnd;
+  raft::device_span<f_t2> vars_bnd;
+  raft::device_span<var_t> var_types;
+
+  typename mip_solver_settings_t<i_t, f_t>::tolerances_t tolerances;
+
+  static constexpr i_t work_per_block = 8 * 1024;
+};
+
+template <typename i_t, typename f_t>
 class lb_problem_t {
  public:
   lb_problem_t(problem_t<i_t, f_t>& problem);
@@ -36,6 +67,7 @@ class lb_problem_t {
 
   struct csr_data_t {
     csr_type_t type;
+    lb_problem_t<i_t, f_t>& lb_problem;
     i_t rows;
     i_t cols;
     i_t nnz;
@@ -46,6 +78,7 @@ class lb_problem_t {
 
     i_t heavy_beg_id;
     i_t sub_warp_count;
+    i_t sub_warp_block_count;
     i_t med_block_count;
     rmm::device_uvector<i_t> warp_offsets;
     rmm::device_uvector<i_t> warp_id_offsets;
@@ -60,8 +93,9 @@ class lb_problem_t {
     vertex_bin_t<i_t> binner;
     std::vector<i_t> bin_offsets;
 
-    csr_data_t(problem_t<i_t, f_t>& problem, csr_type_t type);
+    csr_data_t(lb_problem_t<i_t, f_t>& lb_problem, problem_t<i_t, f_t>& problem, csr_type_t type);
     void setup(problem_t<i_t, f_t>& problem, i_t heavy_deg_cutoff, bool debug = false);
+    csr_data_view_t<i_t, f_t> view();
   };
 
   const problem_t<i_t, f_t>* pb;

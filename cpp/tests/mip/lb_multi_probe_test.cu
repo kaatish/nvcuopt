@@ -19,6 +19,7 @@
 #include "mip_utils.cuh"
 
 #include <raft/sparse/detail/cusparse_wrappers.h>
+#include <thrust/sort.h>
 #include <linear_programming/initial_scaling_strategy/initial_scaling.cuh>
 #include <linear_programming/utilities/problem_checking.cuh>
 #include <mip/presolve/bounds_presolve.cuh>
@@ -41,6 +42,116 @@
 #include <vector>
 
 namespace cuopt::linear_programming::test {
+
+#if 1
+template <typename i_t, typename f_t>
+std::tuple<std::vector<i_t>, std::vector<i_t>, std::vector<i_t>> display_degree_dist(
+  detail::problem_t<i_t, f_t>& problem, bool disp_cnst)
+{
+  rmm::device_uvector<i_t>& offsets = disp_cnst ? problem.offsets : problem.reverse_offsets;
+  rmm::device_uvector<i_t> degrees(offsets.size() - 1, problem.handle_ptr->get_stream());
+  thrust::transform(problem.handle_ptr->get_thrust_policy(),
+                    offsets.begin() + 1,
+                    offsets.end(),
+                    offsets.begin(),
+                    degrees.begin(),
+                    thrust::minus<i_t>{});
+  thrust::sort(problem.handle_ptr->get_thrust_policy(), degrees.begin(), degrees.end());
+  // auto count = thrust::count_if(handle_.get_thrust_policy(),
+  //                  degrees.begin(), degrees.end(),
+  //                  [] __device__ (auto i) {
+  //                  return i == 1;
+  //                  });
+  // std::cout<<"single variable constraint count : "<<count<<"\n";
+  std::vector<i_t> lb_dist;
+  std::vector<i_t> ub_dist;
+  std::vector<i_t> count_dist;
+  {
+    i_t lb     = -1;
+    i_t ub     = 0;
+    auto count = thrust::count_if(problem.handle_ptr->get_thrust_policy(),
+                                  degrees.begin(),
+                                  degrees.end(),
+                                  [lb, ub] __device__(auto i) { return (lb < i) && (i <= ub); });
+    if (count != 0) {
+      lb_dist.push_back(lb);
+      ub_dist.push_back(ub);
+      count_dist.push_back(count);
+    }
+  }
+  {
+    i_t lb     = 0;
+    i_t ub     = 1;
+    auto count = thrust::count_if(problem.handle_ptr->get_thrust_policy(),
+                                  degrees.begin(),
+                                  degrees.end(),
+                                  [lb, ub] __device__(auto i) { return (lb < i) && (i <= ub); });
+    if (count != 0) {
+      lb_dist.push_back(lb);
+      ub_dist.push_back(ub);
+      count_dist.push_back(count);
+    }
+  }
+  for (i_t i = 0; i < 32; ++i) {
+    auto lb    = std::pow(2, i);
+    auto ub    = std::pow(2, i + 1);
+    auto count = thrust::count_if(problem.handle_ptr->get_thrust_policy(),
+                                  degrees.begin(),
+                                  degrees.end(),
+                                  [lb, ub] __device__(auto i) { return (lb < i) && (i <= ub); });
+    if (count != 0) {
+      lb_dist.push_back(lb);
+      ub_dist.push_back(ub);
+      count_dist.push_back(count);
+    }
+  }
+  return std::make_tuple(std::move(lb_dist), std::move(ub_dist), std::move(count_dist));
+}
+
+template <typename i_t, typename f_t>
+void display_cnst_dist(detail::problem_t<i_t, f_t>& problem)
+{
+  auto [cnst_lb_dist, cnst_ub_dist, cnst_count_dist] = display_degree_dist(problem, true);
+  // display max degree
+  auto max_count = cnst_count_dist[0];
+  auto max_bin   = 0;
+  for (size_t i = 0; i < cnst_count_dist.size(); ++i) {
+    if (max_count < cnst_count_dist[i]) {
+      max_count = cnst_count_dist[i];
+      max_bin   = i;
+    }
+  }
+  std::cout << "\ncnst dist max count ";
+  std::cout << cnst_ub_dist[max_bin] << " " << max_count << "\n";
+  for (size_t i = 0; i < cnst_lb_dist.size(); ++i) {
+    std::cout << cnst_lb_dist[i] << " < degree <= " << cnst_ub_dist[i] << "\t" << cnst_count_dist[i]
+              << "\n";
+    //<< " " << ((cnst_count_dist[i] * cnst_ub_dist[i]) + 31) / 32 << "\n";
+  }
+}
+
+template <typename i_t, typename f_t>
+void display_vars_dist(detail::problem_t<i_t, f_t>& problem)
+{
+  auto [vars_lb_dist, vars_ub_dist, vars_count_dist] = display_degree_dist(problem, false);
+  // display max degree
+  auto max_count = vars_count_dist[0];
+  auto max_bin   = 0;
+  for (size_t i = 0; i < vars_count_dist.size(); ++i) {
+    if (max_count < vars_count_dist[i]) {
+      max_count = vars_count_dist[i];
+      max_bin   = i;
+    }
+  }
+  std::cout << "\nvars dist max count ";
+  std::cout << vars_ub_dist[max_bin] << " " << max_count << "\n";
+  for (size_t i = 0; i < vars_lb_dist.size(); ++i) {
+    std::cout << vars_lb_dist[i] << " < degree <= " << vars_ub_dist[i] << "\t" << vars_count_dist[i]
+              << "\n";
+    //<< " " << ((vars_count_dist[i] * vars_ub_dist[i]) + 31) / 32 << "\n";
+  }
+}
+#endif
 
 inline auto make_async() { return std::make_shared<rmm::mr::cuda_async_memory_resource>(); }
 
@@ -159,6 +270,9 @@ void test_multi_probe(std::string path)
   problem_checking_t<int, double>::check_problem_representation(op_problem);
   detail::problem_t<int, double> problem(op_problem);
   detail::lb_problem_t<int, double> lb_problem(problem);
+
+  display_cnst_dist(problem);
+  display_vars_dist(problem);
   // mip_solver_settings_t<int, double> default_settings{};
   // detail::pdhg_solver_t<int, double> pdhg_solver(problem.handle_ptr, problem);
   // detail::pdlp_initial_scaling_strategy_t<int, double> scaling(&handle_,
@@ -210,14 +324,16 @@ void test_multi_probe(std::string path)
 
 TEST(presolve, multi_probe)
 {
-  std::vector<std::string> test_instances = {"mip/50v-10-free-bound.mps",
-                                             "mip/neos5-free-bound.mps"};
-  //"mip/50v-10-free-bound.mps", "mip/neos5-free-bound.mps", "mip/neos5.mps"};
-  for (const auto& test_instance : test_instances) {
-    std::cout << "Running: " << test_instance << std::endl;
-    auto path = make_path_absolute(test_instance);
-    test_multi_probe(path);
-  }
+  // std::vector<std::string> test_instances = {"mip/50v-10-free-bound.mps",
+  //                                            "mip/neos5-free-bound.mps"};
+  ////"mip/50v-10-free-bound.mps", "mip/neos5-free-bound.mps", "mip/neos5.mps"};
+  // for (const auto& test_instance : test_instances) {
+  //   std::cout << "Running: " << test_instance << std::endl;
+  //   auto path = make_path_absolute(test_instance);
+  //   test_multi_probe(path);
+  // }
+  std::string path = "/home/aatish/rapids/mip_files/miplib/square41.mps";
+  test_multi_probe(path);
 }
 
 }  // namespace cuopt::linear_programming::test
