@@ -73,7 +73,7 @@ inline __device__ bool both_valid(thrust::pair<bool, bool>& skip_flag)
   return !thrust::get<0>(skip_flag) && !thrust::get<1>(skip_flag);
 }
 
-template <typename i_t, typename upd_view_t>
+template <typename upd_view_t>
 inline __device__ bool get_valid(thrust::pair<bool, bool>& skip_flag,
                                  upd_view_t upd_0,
                                  upd_view_t upd_1)
