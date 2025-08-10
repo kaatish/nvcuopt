@@ -25,6 +25,7 @@
 #include <mip/presolve/bounds_presolve.cuh>
 #include <mip/presolve/lb_multi_probe.cuh>
 #include <mip/presolve/lb_problem.cuh>
+#include <mip/presolve/trivial_presolve.cuh>
 #include <mps_parser/parser.hpp>
 #include <raft/core/handle.hpp>
 #include <raft/util/cudart_utils.hpp>
@@ -42,6 +43,37 @@
 #include <vector>
 
 namespace cuopt::linear_programming::test {
+
+template <typename i_t, typename f_t>
+std::vector<i_t> rand_id(const raft::handle_t* handle_ptr,
+                         rmm::device_uvector<i_t>& reorg_ids,
+                         const std::vector<i_t>& bin_offsets,
+                         int64_t seed)
+{
+  std::mt19937 rng(seed);
+  std::vector<i_t> r_id;
+
+  for (size_t i = 0; i < bin_offsets.size() - 1; ++i) {
+    if (bin_offsets[i] != bin_offsets[i + 1]) {
+      std::uniform_int_distribution<i_t> dist(bin_offsets[i], bin_offsets[i + 1] - 1);
+      auto id = reorg_ids.element(dist(rng), handle_ptr->get_stream());
+      r_id.push_back(id);
+    }
+  }
+  return r_id;
+}
+
+template <typename i_t, typename f_t>
+std::vector<i_t> get_rand_items(detail::problem_t<i_t, f_t>& lb_problem,
+                                bool disp_cnst,
+                                int64_t seed)
+{
+  if (disp_cnst) {
+    return rand_id(lb_problem.cnst_csr.reorg_ids, lb_problem.cnst_csr.bin_offsets, seed);
+  } else {
+    return rand_id(lb_problem.vars_csr.reorg_ids, lb_problem.vars_csr.bin_offsets, seed);
+  }
+}
 
 #if 1
 template <typename i_t, typename f_t>
@@ -269,25 +301,161 @@ void test_multi_probe(std::string path)
   auto op_problem = mps_data_model_to_optimization_problem(&handle_, mps_problem);
   problem_checking_t<int, double>::check_problem_representation(op_problem);
   detail::problem_t<int, double> problem(op_problem);
+  problem.preprocess_problem();
+  detail::trivial_presolve(problem);
+
   detail::lb_problem_t<int, double> lb_problem(problem);
 
-  display_cnst_dist(problem);
-  display_vars_dist(problem);
-  // mip_solver_settings_t<int, double> default_settings{};
-  // detail::pdhg_solver_t<int, double> pdhg_solver(problem.handle_ptr, problem);
-  // detail::pdlp_initial_scaling_strategy_t<int, double> scaling(&handle_,
-  //                                                              problem,
-  //                                                              10,
-  //                                                              1.0,
-  //                                                              pdhg_solver,
-  //                                                              problem.reverse_coefficients,
-  //                                                              problem.reverse_offsets,
-  //                                                              problem.reverse_constraints,
-  //                                                              true);
-  // detail::mip_solver_t<int, double> solver(problem, default_settings, scaling,
-  // cuopt::timer_t(0)); detail::bound_presolve_t<int, double> bnd_prb_0(solver.context);
-  // detail::bound_presolve_t<int, double> bnd_prb_1(solver.context);
-  // detail::multi_probe_t<int, double> multi_probe_prs(solver.context);
+  // display_cnst_dist(problem);
+  // display_vars_dist(problem);
+  {
+    std::cout << "cnst bin offsets\n";
+    for (auto& o : lb_problem.cnst_csr.bin_offsets) {
+      std::cout << o << "\n";
+    }
+    std::cout << "\n\n";
+  }
+  mip_solver_settings_t<int, double> default_settings{};
+  detail::pdhg_solver_t<int, double> pdhg_solver(problem.handle_ptr, problem);
+  detail::pdlp_initial_scaling_strategy_t<int, double> scaling(&handle_,
+                                                               problem,
+                                                               10,
+                                                               1.0,
+                                                               pdhg_solver,
+                                                               problem.reverse_coefficients,
+                                                               problem.reverse_offsets,
+                                                               problem.reverse_constraints,
+                                                               true);
+  detail::mip_solver_t<int, double> solver(problem, default_settings, scaling, cuopt::timer_t(0));
+  detail::bound_presolve_t<int, double> bnd_prb(solver.context);
+
+  handle_.sync_stream();
+  RAFT_CHECK_CUDA(handle_.get_stream());
+  std::cerr << "setup pt 0\n";
+  detail::lb_multi_probe_t<int, double> lb_multi(solver.context, lb_problem);
+
+  handle_.sync_stream();
+  RAFT_CHECK_CUDA(handle_.get_stream());
+  std::cerr << "setup pt 1\n";
+  lb_multi.upd_0.copy(lb_problem);
+
+  handle_.sync_stream();
+  RAFT_CHECK_CUDA(handle_.get_stream());
+  std::cerr << "setup pt 2\n";
+  lb_multi.upd_1.copy(lb_problem);
+
+  handle_.sync_stream();
+  RAFT_CHECK_CUDA(handle_.get_stream());
+  std::cerr << "setup pt 3\n";
+  lb_multi.upd_0.init_changed_constraints(problem.handle_ptr);
+
+  handle_.sync_stream();
+  RAFT_CHECK_CUDA(handle_.get_stream());
+  std::cerr << "setup pt 4\n";
+  lb_multi.upd_1.init_changed_constraints(problem.handle_ptr);
+
+  handle_.sync_stream();
+  RAFT_CHECK_CUDA(handle_.get_stream());
+  std::cerr << "calculate_constraint_slack_iter\n";
+  lb_multi.calculate_constraint_slack_iter(lb_problem, problem.handle_ptr);
+
+  std::cerr << "calculate_activity_on_problem_bounds\n";
+  bnd_prb.calculate_activity_on_problem_bounds(problem);
+  handle_.sync_stream();
+  RAFT_CHECK_CUDA(handle_.get_stream());
+
+  double tol = 1e-8;
+  std::cout << lb_multi.upd_0.cnst_slack.size() << "\n";
+  std::cout << lb_multi.upd_1.cnst_slack.size() << "\n";
+  std::cout << bnd_prb.upd.min_activity.size() << "\n";
+  std::cout << bnd_prb.upd.max_activity.size() << "\n";
+  std::cout << lb_problem.n_constraints << "\n";
+
+  std::cerr << "pt 0\n";
+  auto min_act = host_copy(bnd_prb.upd.min_activity);
+  std::cerr << "pt 1\n";
+  auto max_act = host_copy(bnd_prb.upd.max_activity);
+  std::cerr << "pt 2\n";
+  auto c_lb = host_copy(problem.constraint_lower_bounds);
+  std::cerr << "pt 3\n";
+  auto c_ub = host_copy(problem.constraint_upper_bounds);
+  std::cerr << "pt 4\n";
+  auto off = host_copy(problem.offsets);
+  std::cerr << "start multi data move\n";
+
+  auto c_sl_0 = host_copy(lb_multi.upd_0.cnst_slack);
+  auto c_sl_1 = host_copy(lb_multi.upd_1.cnst_slack);
+  for (int i = 0; i < lb_problem.n_constraints; ++i) {
+    auto bnd_min_slack_0 = c_ub[i] - min_act[i];
+    auto bnd_max_slack_0 = c_lb[i] - max_act[i];
+    // auto lb_slack_0 = c_sl_0[2*i];
+    // auto lb_slack_1 = c_sl_0[2*i+1];
+
+    auto lb_min_slack_0 = c_sl_0[2 * i];
+    auto lb_max_slack_0 = c_sl_0[2 * i + 1];
+    auto lb_min_slack_1 = c_sl_1[2 * i];
+    auto lb_max_slack_1 = c_sl_1[2 * i + 1];
+    if ((abs(lb_min_slack_0 - bnd_min_slack_0) / bnd_min_slack_0 > tol) ||
+        (std::isinf(lb_min_slack_0) ^ std::isinf(bnd_min_slack_0))) {
+      auto deg = off[i + 1] - off[i];
+      std::cout << "min mismatch " << i << " " << bnd_min_slack_0 << " " << lb_min_slack_0
+                << "\tdiff = " << abs(bnd_min_slack_0 - lb_min_slack_0) << " " << deg << "\n";
+    }
+    if ((abs(lb_max_slack_0 - bnd_max_slack_0) / bnd_max_slack_0 > tol) ||
+        (std::isinf(lb_max_slack_0) ^ std::isinf(bnd_max_slack_0))) {
+      auto deg = off[i + 1] - off[i];
+      std::cout << "min mismatch " << i << " " << bnd_max_slack_0 << " " << lb_max_slack_0
+                << "\tdiff = " << abs(bnd_max_slack_0 - lb_max_slack_0) << " " << deg << "\n";
+    }
+    if (i < 2) {
+      auto deg = off[i + 1] - off[i];
+      std::cout << "deg " << deg << "\n";
+      std::cout << "min " << i << " " << bnd_min_slack_0 << " " << lb_min_slack_0 << " "
+                << lb_min_slack_1 << "\n";
+      std::cout << "max " << i << " " << bnd_max_slack_0 << " " << lb_max_slack_0 << " "
+                << lb_max_slack_1 << "\n";
+    }
+  }
+  // for (int i = 0; i < lb_problem.n_constraints; ++i) {
+  //   //auto bnd_slack_0 = c_ub[i] - min_act[i];
+  //   //auto bnd_slack_1 = c_lb[i] - max_act[i];
+  //   //auto lb_slack_0 = c_sl_0[2*i];
+  //   //auto lb_slack_1 = c_sl_0[2*i+1];
+
+  //  //auto lb_min_act_0 = c_ub[i] - c_sl_0[2*i];
+  //  //auto lb_max_act_0 = c_lb[i] - c_sl_0[2*i+1];
+  //  //auto lb_min_act_1 = c_ub[i] - c_sl_1[2*i];
+  //  //auto lb_max_act_1 = c_lb[i] - c_sl_1[2*i+1];
+  //  auto lb_min_act_0 = c_sl_0[2*i];
+  //  auto lb_max_act_0 = c_sl_0[2*i+1];
+  //  auto lb_min_act_1 = c_sl_1[2*i];
+  //  auto lb_max_act_1 = c_sl_1[2*i+1];
+  //  //if (abs(lb_slack_0 - bnd_slack_0)/bnd_slack_0 > tol) {
+  //  if ((abs(lb_min_act_0 - min_act[i])/min_act[i] > tol) || (std::isinf(lb_min_act_0) ^
+  //  std::isinf(min_act[i]))) {
+  //    auto deg = off[i+1] - off[i];
+  //    std::cout<<"min mismatch "<<i<<" "<<min_act[i]<<" "<<lb_min_act_0<<"\tdiff =
+  //    "<<abs(min_act[i] - lb_min_act_0)<<" "<<deg<<"\n";
+  //  }
+  //  //if (abs(lb_slack_1 - bnd_slack_1)/bnd_slack_1 > tol) {
+  //  if ((abs(lb_max_act_0 - max_act[i])/max_act[i] > tol) || (std::isinf(lb_max_act_0) ^
+  //  std::isinf(max_act[i]))) {
+  //    auto deg = off[i+1] - off[i];
+  //    std::cout<<"max mismatch "<<i<<" "<<max_act[i]<<" "<<lb_max_act_0<<"\tdiff =
+  //    "<<abs(max_act[i] - lb_max_act_0)<<" "<<deg<<"\n";
+  //  }
+  //  if (i < 2)
+  //  {
+  //    auto deg = off[i+1] - off[i];
+  //    std::cout<<"deg "<<deg<<"\n";
+  //    std::cout<<"min "<<i<<" "<<min_act[i]<<" "<<lb_min_act_0<<" "<<lb_min_act_1<<"\n";
+  //    std::cout<<"max "<<i<<" "<<max_act[i]<<" "<<lb_max_act_0<<" "<<lb_max_act_1<<"\n";
+  //  }
+  //}
+
+  // auto lb_sl = lb_multi.
+  //  detail::bound_presolve_t<int, double> bnd_prb_1(solver.context);
+  //  detail::multi_probe_t<int, double> multi_probe_prs(solver.context);
 
   // auto probe_tuple       = select_k_random(problem, 100);
   // auto bounds_probe_vals = convert_probe_tuple(probe_tuple);
@@ -332,7 +500,10 @@ TEST(presolve, multi_probe)
   //   auto path = make_path_absolute(test_instance);
   //   test_multi_probe(path);
   // }
-  std::string path = "/home/aatish/rapids/mip_files/miplib/square41.mps";
+  std::string path = "/home/aatish/rapids/mip_files/miplib/square47.mps";
+  // std::string path = "/home/aatish/rapids/mip_files/miplib/neos17.mps";
+  // std::string path = "/home/aatish/rapids/mip_files/miplib/sing44.mps";
+  // std::string path = "/home/aatish/rapids/mip_files/miplib/neos-3402454-bohle.mps";
   test_multi_probe(path);
 }
 

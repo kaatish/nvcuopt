@@ -51,8 +51,14 @@ void lb_multi_probe_t<i_t, f_t>::calculate_constraint_slack_iter(lb_problem_t<i_
 {
   auto num_blocks = problem.cnst_csr.sub_warp_block_count + problem.cnst_csr.med_block_count +
                     problem.cnst_csr.num_blocks_heavy;
-  call_cnst_slack<true, i_t, f_t, 256><<<num_blocks, 256, 0, handle_ptr->get_stream()>>>(
+  std::cerr << "call_cnst_slack sub_warp_block_count " << problem.cnst_csr.sub_warp_block_count
+            << "\n";
+  std::cerr << "call_cnst_slack med_block_count " << problem.cnst_csr.med_block_count << "\n";
+  std::cerr << "call_cnst_slack num_blocks_heavy " << problem.cnst_csr.num_blocks_heavy << "\n";
+  call_cnst_slack<false, i_t, f_t, 512><<<num_blocks, 512, 0, handle_ptr->get_stream()>>>(
     problem.cnst_csr.view(), upd_0.view(), upd_1.view());
+  handle_ptr->sync_stream();
+  RAFT_CHECK_CUDA(handle_ptr->get_stream());
 }
 
 #if MIP_INSTANTIATE_FLOAT

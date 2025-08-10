@@ -70,8 +70,13 @@ __device__ __forceinline__ void get_block_bin(i_t* id_block_beg,
     *id_range_end = gridDim.x;
     return;
   } else {
-    i_t beg       = block_id_offsets[seg] + block_offsets[seg] * (blockDim.x / threads_per_row);
-    i_t end       = block_id_offsets[seg + 1];
+    i_t beg =
+      block_id_offsets[seg] + (med_block_id - block_offsets[seg]) * (blockDim.x / threads_per_row);
+    i_t end = block_id_offsets[seg + 1];
+    // if (threadIdx.x == 0) {
+    //   printf("seg %d block_offsets[seg] %d block_id_offsets[seg] %d beg %d end %d\n", seg,
+    //   block_offsets[seg], block_id_offsets[seg], beg, end);
+    // }
     *id_block_beg = beg;
     *id_range_end = end;
     *t_p_v        = threads_per_row;

@@ -268,7 +268,7 @@ std::tuple<i_t, i_t, i_t> block_meta(rmm::cuda_stream_view stream,
     }
   }
   std::cout << "\n";
-  i_t block_size = 256;
+  i_t block_size = 512;
 
   std::vector<i_t> warp_offsets;
   std::vector<i_t> warp_id_offsets;
@@ -313,9 +313,12 @@ std::tuple<i_t, i_t, i_t> block_meta(rmm::cuda_stream_view stream,
   std::vector<i_t> block_id_offsets;
   std::vector<i_t> block_offsets;
   block_offsets.push_back(0);
-  for (i_t t_p_v = 32; t_p_v <= block_size * 2; t_p_v *= 2) {
+  // for (i_t t_p_v = 32; t_p_v <= block_size * 2; t_p_v *= 2) {
+  for (i_t t_p_v = 32; t_p_v <= 256; t_p_v *= 2) {
     block_id_offsets.push_back(bin_offsets[std::log2(t_p_v * w_t_r) + 1]);
   }
+  block_id_offsets.push_back(heavy_id_beg);
+  block_id_offsets.push_back(bin_offsets.back());
   i_t t_p_v = 32;
   std::cout << "t_p_v" << " " << "num_items" << " " << "items_per_block" << " "
             << "num_complete_blocks" << "\n";
@@ -328,6 +331,8 @@ std::tuple<i_t, i_t, i_t> block_meta(rmm::cuda_stream_view stream,
     block_offsets.push_back(block_offsets.back() + num_complete_blocks);
     t_p_v *= 2;
   }
+  std::cout << "num_sub_warps " << num_sub_warps << " " << "num_sub_warp_blocks "
+            << num_sub_warp_blocks << "\n";
 
   // block_id_offsets.push_back(bin_offsets[std::log2(16 * 2 * w_t_r) + 3]);
   // block_offsets.push_back(block_offsets.back() +

@@ -58,6 +58,7 @@ struct lb_bounds_update_data_t {
               i_t num_blocks_heavy_cnst,
               i_t num_blocks_heavy_vars);
   void init_changed_constraints(const raft::handle_t* handle_ptr);
+  void disable_changed_constraints(const raft::handle_t* handle_ptr);
   void prepare_for_next_iteration(const raft::handle_t* handle_ptr);
   view_t view();
 };

@@ -108,6 +108,22 @@ void lb_bounds_update_data_t<i_t, f_t>::init_changed_constraints(const raft::han
 }
 
 template <typename i_t, typename f_t>
+void lb_bounds_update_data_t<i_t, f_t>::disable_changed_constraints(
+  const raft::handle_t* handle_ptr)
+{
+  thrust::fill(
+    handle_ptr->get_thrust_policy(), var_bounds_changed.begin(), var_bounds_changed.end(), 0);
+  thrust::fill(
+    handle_ptr->get_thrust_policy(), changed_variables.begin(), changed_variables.end(), 1);
+  thrust::fill(
+    handle_ptr->get_thrust_policy(), changed_constraints.begin(), changed_constraints.end(), 0);
+  thrust::fill(handle_ptr->get_thrust_policy(),
+               next_changed_constraints.begin(),
+               next_changed_constraints.end(),
+               0);
+}
+
+template <typename i_t, typename f_t>
 void lb_bounds_update_data_t<i_t, f_t>::prepare_for_next_iteration(const raft::handle_t* handle_ptr)
 {
   std::swap(changed_constraints, next_changed_constraints);
