@@ -25,6 +25,7 @@
 #include <mip/presolve/bounds_presolve.cuh>
 #include <mip/presolve/lb_multi_probe.cuh>
 #include <mip/presolve/lb_problem.cuh>
+#include <mip/presolve/multi_probe.cuh>
 #include <mip/presolve/trivial_presolve.cuh>
 #include <mps_parser/parser.hpp>
 #include <raft/core/handle.hpp>
@@ -328,38 +329,34 @@ void test_multi_probe(std::string path)
                                                                true);
   detail::mip_solver_t<int, double> solver(problem, default_settings, scaling, cuopt::timer_t(0));
   detail::bound_presolve_t<int, double> bnd_prb(solver.context);
+  // detail::multi_probe_t<int, double> multi(solver.context);
+  // multi.upd_0.init_changed_constraints(problem.handle_ptr);
+  // multi.upd_1.init_changed_constraints(problem.handle_ptr);
 
   handle_.sync_stream();
   RAFT_CHECK_CUDA(handle_.get_stream());
-  std::cerr << "setup pt 0\n";
   detail::lb_multi_probe_t<int, double> lb_multi(solver.context, lb_problem);
 
   handle_.sync_stream();
   RAFT_CHECK_CUDA(handle_.get_stream());
-  std::cerr << "setup pt 1\n";
   lb_multi.upd_0.copy(lb_problem);
 
   handle_.sync_stream();
   RAFT_CHECK_CUDA(handle_.get_stream());
-  std::cerr << "setup pt 2\n";
   lb_multi.upd_1.copy(lb_problem);
 
   handle_.sync_stream();
   RAFT_CHECK_CUDA(handle_.get_stream());
-  std::cerr << "setup pt 3\n";
   lb_multi.upd_0.init_changed_constraints(problem.handle_ptr);
 
   handle_.sync_stream();
   RAFT_CHECK_CUDA(handle_.get_stream());
-  std::cerr << "setup pt 4\n";
   lb_multi.upd_1.init_changed_constraints(problem.handle_ptr);
 
   handle_.sync_stream();
   RAFT_CHECK_CUDA(handle_.get_stream());
-  std::cerr << "calculate_constraint_slack_iter\n";
   lb_multi.calculate_constraint_slack_iter(lb_problem, problem.handle_ptr);
 
-  std::cerr << "calculate_activity_on_problem_bounds\n";
   bnd_prb.calculate_activity_on_problem_bounds(problem);
   handle_.sync_stream();
   RAFT_CHECK_CUDA(handle_.get_stream());

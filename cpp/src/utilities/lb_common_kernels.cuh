@@ -64,10 +64,12 @@ __device__ __forceinline__ void get_block_bin(i_t* id_block_beg,
   i_t seg             = 31 - __clz(m);
   i_t threads_per_row = (32 << seg);
   // heavy
-  if (threads_per_row > blockDim.x) {
-    *t_p_v        = threads_per_row;
-    *id_block_beg = sub_warp_block_count + med_block_count;
-    *id_range_end = gridDim.x;
+  if (threads_per_row > 256) {
+    *t_p_v = threads_per_row;
+    //*id_block_beg = sub_warp_block_count + med_block_count;
+    //*id_range_end = gridDim.x;
+    *id_block_beg = -1;
+    *id_range_end = -1;
     return;
   } else {
     i_t beg =

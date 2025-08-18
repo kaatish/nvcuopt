@@ -111,7 +111,7 @@ class lb_problem_t {
   i_t n_variables;
   i_t nnz;
 
-  static constexpr i_t heavy_degree_cutoff = 64 * 1024;
+  static constexpr i_t heavy_degree_cutoff = 16 * 1024;
 };
 
 }  // namespace cuopt::linear_programming::detail

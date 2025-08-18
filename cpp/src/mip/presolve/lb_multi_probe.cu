@@ -51,14 +51,24 @@ void lb_multi_probe_t<i_t, f_t>::calculate_constraint_slack_iter(lb_problem_t<i_
 {
   auto num_blocks = problem.cnst_csr.sub_warp_block_count + problem.cnst_csr.med_block_count +
                     problem.cnst_csr.num_blocks_heavy;
-  std::cerr << "call_cnst_slack sub_warp_block_count " << problem.cnst_csr.sub_warp_block_count
+  std::cout << "call_cnst_slack sub_warp_block_count " << problem.cnst_csr.sub_warp_block_count
             << "\n";
-  std::cerr << "call_cnst_slack med_block_count " << problem.cnst_csr.med_block_count << "\n";
-  std::cerr << "call_cnst_slack num_blocks_heavy " << problem.cnst_csr.num_blocks_heavy << "\n";
-  call_cnst_slack<false, i_t, f_t, 512><<<num_blocks, 512, 0, handle_ptr->get_stream()>>>(
+  std::cout << "call_cnst_slack med_block_count " << problem.cnst_csr.med_block_count << "\n";
+  std::cout << "call_cnst_slack num_blocks_heavy " << problem.cnst_csr.num_blocks_heavy << "\n";
+
+  std::cout << "call_cnst_slack sub_warp+med "
+            << problem.cnst_csr.sub_warp_block_count + problem.cnst_csr.med_block_count << "\n";
+
+  std::cout << "num_heavy_items " << problem.n_constraints - problem.cnst_csr.heavy_beg_id << "\n";
+  constexpr bool erase_inf_cnst = false;
+  call_cnst_slack<erase_inf_cnst, i_t, f_t, 512><<<num_blocks, 512, 0, handle_ptr->get_stream()>>>(
     problem.cnst_csr.view(), upd_0.view(), upd_1.view());
-  handle_ptr->sync_stream();
-  RAFT_CHECK_CUDA(handle_ptr->get_stream());
+  if (problem.cnst_csr.num_blocks_heavy != 0) {
+    auto num_heavy_items = problem.n_constraints - problem.cnst_csr.heavy_beg_id;
+    finalize_cnst_heavy<erase_inf_cnst, i_t, f_t, 32>
+      <<<num_heavy_items, 32, 0, handle_ptr->get_stream()>>>(
+        problem.cnst_csr.view(), upd_0.view(), upd_1.view());
+  }
 }
 
 #if MIP_INSTANTIATE_FLOAT

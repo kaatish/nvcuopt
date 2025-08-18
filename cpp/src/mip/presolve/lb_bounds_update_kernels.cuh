@@ -60,7 +60,7 @@ struct warp_reduce_t {
   using warp_reduce = cub::WarpReduce<f_t, MAX_EDGE_PER_CNST>;
 
   // When LOGICAL_WARP_THREADS are a power of 2 then WarpReduce uses shuffle instead of shared
-  // memory
+  // memory. Therefore, no shared memory is being used in these reductions
   using storage_t = typename warp_reduce::TempStorage[4 * BDIM / MAX_EDGE_PER_CNST];
 
   storage_t& temp_storage;
@@ -233,6 +233,58 @@ struct partial_block_reduce_t {
   }
 };
 
+template <typename f_t, int BDIM>
+union reduction_storage_t {
+  typename block_reduce_t<f_t, BDIM>::storage_t block_reduce_storage_;
+
+  typename warp_reduce_t<f_t, 32, BDIM>::storage_t warp_storage_32_;
+  typename warp_reduce_t<f_t, 16, BDIM>::storage_t warp_storage_16_;
+  typename warp_reduce_t<f_t, 8, BDIM>::storage_t warp_storage_8_;
+  typename warp_reduce_t<f_t, 4, BDIM>::storage_t warp_storage_4_;
+  typename warp_reduce_t<f_t, 2, BDIM>::storage_t warp_storage_2_;
+  typename warp_reduce_t<f_t, 1, BDIM>::storage_t warp_storage_1_;
+
+  typename partial_block_reduce_t<f_t, BDIM, 256>::storage_t partial_block_storage_256_;
+  typename partial_block_reduce_t<f_t, BDIM, 128>::storage_t partial_block_storage_128_;
+  typename partial_block_reduce_t<f_t, BDIM, 64>::storage_t partial_block_storage_64_;
+};
+
+template <int size, typename storage_t>
+__device__ auto& warp_storage(storage_t& storage)
+{
+  if constexpr (size == 32) {
+    return storage.warp_storage_32_;
+  } else if constexpr (size == 16) {
+    return storage.warp_storage_16_;
+  } else if constexpr (size == 8) {
+    return storage.warp_storage_8_;
+  } else if constexpr (size == 4) {
+    return storage.warp_storage_4_;
+  } else if constexpr (size == 2) {
+    return storage.warp_storage_2_;
+  } else if constexpr (size == 1) {
+    return storage.warp_storage_1_;
+  }
+}
+
+template <int size, typename storage_t>
+__device__ auto& partial_block_storage(storage_t& storage)
+{
+  if constexpr (size == 256) {
+    return storage.partial_block_storage_256_;
+  } else if constexpr (size == 128) {
+    return storage.partial_block_storage_128_;
+  } else if constexpr (size == 64) {
+    return storage.partial_block_storage_64_;
+  }
+}
+
+template <typename storage_t>
+__device__ auto& block_storage(storage_t& storage)
+{
+  return storage.block_reduce_storage_;
+}
+
 template <typename i_t,
           typename f_t,
           int MAX_EDGE_PER_CNST,
@@ -330,42 +382,63 @@ __device__ void cnst_heavy(i_t id_block_beg,
                            i_t work_per_block,
                            csr_view_t view,
                            upd_view_t upd0,
-                           upd_view_t upd1)
+                           upd_view_t upd1,
+                           reduction_storage_t<f_t, BDIM>& storage)
 {
-  auto idx       = view.heavy_vertex_ids[blockIdx.x - id_block_beg] + view.heavy_beg_id;
+  // if (heavy_block_id > view.heavy_pseudo_block_ids.size()) {
+
+  auto heavy_block_id = blockIdx.x - (view.sub_warp_block_count + view.med_block_count);
+
+  // if (heavy_block_id > view.heavy_vertex_ids.size()) {
+  //   printf("heavy_block_id oob %d %d %d\n", int(view.heavy_vertex_ids.size()), heavy_block_id,
+  //   (view.sub_warp_block_count + view.med_block_count)); return;
+  // }
+
+  auto idx = view.heavy_vertex_ids[heavy_block_id] + view.heavy_beg_id;
+
+  // if (idx >= view.reorg_ids.size()) {
+  //   printf("idx oob reorg\n");
+  //   return;
+  // }
+
+  // if (idx + 1 >= view.offsets.size()) {
+  //   printf("idx oob offset\n");
+  //   return;
+  // }
+
   auto cnst_idx  = view.reorg_ids[idx];
   auto skip_calc = skip_cnst(upd0, upd1, cnst_idx);
 
   if (skip_both(skip_calc)) { return; }
 
-  auto pseudo_block_id = view.heavy_pseudo_block_ids[blockIdx.x];
+  auto pseudo_block_id = view.heavy_pseudo_block_ids[heavy_block_id];
   i_t item_off_beg     = view.offsets[idx] + work_per_block * pseudo_block_id;
   i_t item_off_end     = min(item_off_beg + work_per_block, view.offsets[idx + 1]);
 
-  using reduce_t  = block_reduce_t<f_t, BDIM>;
-  using storage_t = typename reduce_t::storage_t;
-  __shared__ storage_t storage;
-  block_reduce_t<f_t, BDIM> reduce(storage);
+  using reduce_t = block_reduce_t<f_t, BDIM>;
+  // using storage_t = typename reduce_t::storage_t;
+  //__shared__ storage_t storage;
+  block_reduce_t<f_t, BDIM> reduce(block_storage(storage));
 
   if (both_valid(skip_calc)) {
     auto act = calc_act<i_t, f_t, BDIM>(view, upd0, upd1, threadIdx.x, item_off_beg, item_off_end);
     reduce.sum(act);
     if (threadIdx.x == 0) {
-      upd0.tmp_act[blockIdx.x] = thrust::get<0>(act);
-      upd1.tmp_act[blockIdx.x] = thrust::get<1>(act);
+      upd0.tmp_act[heavy_block_id] = thrust::get<0>(act);
+      upd1.tmp_act[heavy_block_id] = thrust::get<1>(act);
     }
   } else {
     auto& upd = get_valid(skip_calc, upd0, upd1);
     auto act  = calc_act<i_t, f_t, BDIM>(view, upd, threadIdx.x, item_off_beg, item_off_end);
     reduce.sum(act);
-    if (threadIdx.x == 0) { upd.tmp_act[blockIdx.x] = act; }
+    if (threadIdx.x == 0) { upd.tmp_act[heavy_block_id] = act; }
   }
 }
 
 template <bool erase_inf_cnst,
+          typename i_t,
           typename f_t,
           int BDIM,
-          typename i_t,
           typename csr_view_t,
           typename upd_view_t>
 __global__ void finalize_cnst_heavy(csr_view_t view, upd_view_t upd0, upd_view_t upd1)
@@ -373,7 +446,7 @@ __global__ void finalize_cnst_heavy(csr_view_t view, upd_view_t upd0, upd_view_t
   using f_t2 = typename type_2<f_t>::type;
 
   auto idx        = blockIdx.x + view.heavy_beg_id;
-  i_t cnst_idx    = view.cnst_reorg_ids[idx];
+  i_t cnst_idx    = view.reorg_ids[idx];
   auto cnst_lb_ub = view.cnst_bnd[idx];
 
   auto skip_calc = skip_cnst(upd0, upd1, cnst_idx);
@@ -430,8 +503,12 @@ template <bool erase_inf_cnst,
           typename i_t,
           typename csr_view_t,
           typename upd_view_t>
-__device__ void cnst_sub_warp(
-  i_t id_warp_beg, i_t id_range_end, csr_view_t view, upd_view_t upd0, upd_view_t upd1)
+__device__ void cnst_sub_warp(i_t id_warp_beg,
+                              i_t id_range_end,
+                              csr_view_t view,
+                              upd_view_t upd0,
+                              upd_view_t upd1,
+                              reduction_storage_t<f_t, BDIM>& storage)
 {
   using f_t2 = typename type_2<f_t>::type;
 
@@ -463,10 +540,10 @@ __device__ void cnst_sub_warp(
   i_t p_tid      = lane_id & (MAX_EDGE_PER_CNST - 1);
   bool head_flag = (p_tid == 0);
 
-  using reduce_t  = warp_reduce_t<f_t, MAX_EDGE_PER_CNST, BDIM>;
-  using storage_t = typename reduce_t::storage_t;
-  __shared__ storage_t storage;
-  reduce_t reduce(storage);
+  using reduce_t = warp_reduce_t<f_t, MAX_EDGE_PER_CNST, BDIM>;
+  // using storage_t = typename reduce_t::storage_t;
+  //__shared__ storage_t storage;
+  reduce_t reduce(warp_storage<MAX_EDGE_PER_CNST>(storage));
 
   auto act = thrust::make_pair(f_t2{0., 0.}, f_t2{0., 0.});
 
@@ -513,8 +590,12 @@ template <bool erase_inf_cnst,
           typename i_t,
           typename csr_view_t,
           typename upd_view_t>
-__device__ void cnst_warp(
-  i_t id_block_beg, i_t id_range_end, csr_view_t view, upd_view_t upd0, upd_view_t upd1)
+__device__ void cnst_warp(i_t id_block_beg,
+                          i_t id_range_end,
+                          csr_view_t view,
+                          upd_view_t upd0,
+                          upd_view_t upd1,
+                          reduction_storage_t<f_t, BDIM>& storage)
 {
   using f_t2 = typename type_2<f_t>::type;
 
@@ -543,10 +624,10 @@ __device__ void cnst_warp(
   i_t p_tid      = (threadIdx.x & 31);
   bool head_flag = (p_tid == 0);
 
-  using reduce_t  = warp_reduce_t<f_t, 32, BDIM>;
-  using storage_t = typename reduce_t::storage_t;
-  __shared__ storage_t storage;
-  reduce_t reduce(storage);
+  using reduce_t = warp_reduce_t<f_t, 32, BDIM>;
+  // using storage_t = typename reduce_t::storage_t;
+  //__shared__ storage_t storage;
+  reduce_t reduce(warp_storage<32>(storage));
 
   auto act = thrust::make_pair(f_t2{0., 0.}, f_t2{0., 0.});
 
@@ -581,8 +662,12 @@ template <bool erase_inf_cnst,
           typename i_t,
           typename csr_view_t,
           typename upd_view_t>
-__device__ void cnst_block(
-  i_t id_block_beg, i_t id_range_end, csr_view_t view, upd_view_t upd0, upd_view_t upd1)
+__device__ void cnst_block(i_t id_block_beg,
+                           i_t id_range_end,
+                           csr_view_t view,
+                           upd_view_t upd0,
+                           upd_view_t upd1,
+                           reduction_storage_t<f_t, BDIM>& storage)
 {
   using f_t2 = typename type_2<f_t>::type;
 
@@ -611,10 +696,10 @@ __device__ void cnst_block(
     }
   }
 
-  using reduce_t  = partial_block_reduce_t<f_t, BDIM, PSEUDO_BDIM>;
-  using storage_t = typename reduce_t::storage_t;
-  __shared__ storage_t storage;
-  reduce_t reduce(storage);
+  using reduce_t = partial_block_reduce_t<f_t, BDIM, PSEUDO_BDIM>;
+  // using storage_t = typename reduce_t::storage_t;
+  //__shared__ storage_t storage;
+  reduce_t reduce(partial_block_storage<PSEUDO_BDIM>(storage));
 
   i_t item_off_beg = view.offsets[idx];
   i_t item_off_end = view.offsets[idx + 1];
@@ -645,7 +730,10 @@ template <bool erase_inf_cnst,
           int BDIM,
           typename csr_view_t,
           typename upd_view_t>
-__device__ void call_cnst_sub_warp(csr_view_t view, upd_view_t upd0, upd_view_t upd1)
+__device__ void call_cnst_sub_warp(csr_view_t view,
+                                   upd_view_t upd0,
+                                   upd_view_t upd1,
+                                   reduction_storage_t<f_t, BDIM>& storage)
 {
   i_t id_warp_beg, id_range_end, t_p_v;
   get_sub_warp_bin<i_t>(&id_warp_beg,
@@ -656,15 +744,20 @@ __device__ void call_cnst_sub_warp(csr_view_t view, upd_view_t upd0, upd_view_t 
                         view.sub_warp_count);
 
   if (t_p_v == 1) {
-    cnst_sub_warp<erase_inf_cnst, f_t, BDIM, 1>(id_warp_beg, id_range_end, view, upd0, upd1);
+    cnst_sub_warp<erase_inf_cnst, f_t, BDIM, 1>(
+      id_warp_beg, id_range_end, view, upd0, upd1, storage);
   } else if (t_p_v == 2) {
-    cnst_sub_warp<erase_inf_cnst, f_t, BDIM, 2>(id_warp_beg, id_range_end, view, upd0, upd1);
+    cnst_sub_warp<erase_inf_cnst, f_t, BDIM, 2>(
+      id_warp_beg, id_range_end, view, upd0, upd1, storage);
   } else if (t_p_v == 4) {
-    cnst_sub_warp<erase_inf_cnst, f_t, BDIM, 4>(id_warp_beg, id_range_end, view, upd0, upd1);
+    cnst_sub_warp<erase_inf_cnst, f_t, BDIM, 4>(
+      id_warp_beg, id_range_end, view, upd0, upd1, storage);
   } else if (t_p_v == 8) {
-    cnst_sub_warp<erase_inf_cnst, f_t, BDIM, 8>(id_warp_beg, id_range_end, view, upd0, upd1);
+    cnst_sub_warp<erase_inf_cnst, f_t, BDIM, 8>(
+      id_warp_beg, id_range_end, view, upd0, upd1, storage);
   } else if (t_p_v == 16) {
-    cnst_sub_warp<erase_inf_cnst, f_t, BDIM, 16>(id_warp_beg, id_range_end, view, upd0, upd1);
+    cnst_sub_warp<erase_inf_cnst, f_t, BDIM, 16>(
+      id_warp_beg, id_range_end, view, upd0, upd1, storage);
   }
 }
 
@@ -674,7 +767,10 @@ template <bool erase_inf_cnst,
           int BDIM,
           typename csr_view_t,
           typename upd_view_t>
-__device__ void call_cnst_block(csr_view_t view, upd_view_t upd0, upd_view_t upd1)
+__device__ void call_cnst_block(csr_view_t view,
+                                upd_view_t upd0,
+                                upd_view_t upd1,
+                                reduction_storage_t<f_t, BDIM>& storage)
 {
   i_t id_block_beg, id_block_end, t_p_v;
   get_block_bin<i_t>(&id_block_beg,
@@ -688,23 +784,27 @@ __device__ void call_cnst_block(csr_view_t view, upd_view_t upd0, upd_view_t upd
   if (t_p_v == 32) {
     // if (threadIdx.x == 0) { printf("block %d t_p_v %d id_beg %d id_end %d\n", blockIdx.x, t_p_v,
     // id_block_beg, id_block_end); }
-    cnst_warp<erase_inf_cnst, f_t, BDIM>(id_block_beg, id_block_end, view, upd0, upd1);
+    cnst_warp<erase_inf_cnst, f_t, BDIM>(id_block_beg, id_block_end, view, upd0, upd1, storage);
   } else if (t_p_v == 64) {
     // if (threadIdx.x == 0) { printf("block %d t_p_v %d id_beg %d id_end %d\n", blockIdx.x, t_p_v,
     // id_block_beg, id_block_end); }
-    cnst_block<erase_inf_cnst, f_t, BDIM, 64>(id_block_beg, id_block_end, view, upd0, upd1);
+    cnst_block<erase_inf_cnst, f_t, BDIM, 64>(
+      id_block_beg, id_block_end, view, upd0, upd1, storage);
   } else if (t_p_v == 128) {
     // if (threadIdx.x == 0) { printf("block %d t_p_v %d id_beg %d id_end %d\n", blockIdx.x, t_p_v,
     // id_block_beg, id_block_end); }
-    cnst_block<erase_inf_cnst, f_t, BDIM, 128>(id_block_beg, id_block_end, view, upd0, upd1);
+    cnst_block<erase_inf_cnst, f_t, BDIM, 128>(
+      id_block_beg, id_block_end, view, upd0, upd1, storage);
   } else if (t_p_v == 256) {
     // if (threadIdx.x == 0) { printf("block %d t_p_v %d id_beg %d id_end %d\n", blockIdx.x, t_p_v,
     // id_block_beg, id_block_end); }
-    cnst_block<erase_inf_cnst, f_t, BDIM, 256>(id_block_beg, id_block_end, view, upd0, upd1);
+    cnst_block<erase_inf_cnst, f_t, BDIM, 256>(
+      id_block_beg, id_block_end, view, upd0, upd1, storage);
   } else {
-    // if (threadIdx.x == 0) { printf("heavy block %d t_p_v %d id_beg %d id_end %d\n", blockIdx.x,
-    // t_p_v, id_block_beg, id_block_end); }
-    cnst_heavy<f_t, BDIM>(id_block_beg, id_block_end, view.work_per_block, view, upd0, upd1);
+    // if (threadIdx.x == 0) { printf("block %d t_p_v %d id_beg %d id_end %d\n", blockIdx.x, t_p_v,
+    // id_block_beg, id_block_end); }
+    cnst_heavy<f_t, BDIM>(
+      id_block_beg, id_block_end, view.work_per_block, view, upd0, upd1, storage);
   }
 }
 
@@ -717,10 +817,11 @@ template <bool erase_inf_cnst,
           typename upd_view_t>
 __global__ void call_cnst_slack(csr_view_t view, upd_view_t upd0, upd_view_t upd1)
 {
+  __shared__ reduction_storage_t<f_t, BDIM> storage;
   if (blockIdx.x < view.sub_warp_block_count) {
-    call_cnst_sub_warp<erase_inf_cnst, i_t, f_t, BDIM>(view, upd0, upd1);
+    call_cnst_sub_warp<erase_inf_cnst, i_t, f_t, BDIM>(view, upd0, upd1, storage);
   } else {
-    call_cnst_block<erase_inf_cnst, i_t, f_t, BDIM>(view, upd0, upd1);
+    call_cnst_block<erase_inf_cnst, i_t, f_t, BDIM>(view, upd0, upd1, storage);
   }
 }
 

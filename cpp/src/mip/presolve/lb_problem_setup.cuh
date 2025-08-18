@@ -312,16 +312,16 @@ std::tuple<i_t, i_t, i_t> block_meta(rmm::cuda_stream_view stream,
   //[128, 256]
   std::vector<i_t> block_id_offsets;
   std::vector<i_t> block_offsets;
-  block_offsets.push_back(0);
   // for (i_t t_p_v = 32; t_p_v <= block_size * 2; t_p_v *= 2) {
   for (i_t t_p_v = 32; t_p_v <= 256; t_p_v *= 2) {
     block_id_offsets.push_back(bin_offsets[std::log2(t_p_v * w_t_r) + 1]);
   }
   block_id_offsets.push_back(heavy_id_beg);
-  block_id_offsets.push_back(bin_offsets.back());
   i_t t_p_v = 32;
   std::cout << "t_p_v" << " " << "num_items" << " " << "items_per_block" << " "
             << "num_complete_blocks" << "\n";
+
+  block_offsets.push_back(0);
   for (size_t i = 0; i < block_id_offsets.size() - 1; ++i) {
     auto num_items           = block_id_offsets[i + 1] - block_id_offsets[i];
     auto items_per_block     = raft::ceildiv(block_size, t_p_v);
