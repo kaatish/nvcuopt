@@ -65,6 +65,7 @@ typename bounds_update_data_t<i_t, f_t>::view_t bounds_update_data_t<i_t, f_t>::
 template <typename i_t, typename f_t>
 void bounds_update_data_t<i_t, f_t>::init_changed_constraints(const raft::handle_t* handle_ptr)
 {
+  // TODO : populate heavy_bounds_changed
   thrust::fill(
     handle_ptr->get_thrust_policy(), changed_variables.begin(), changed_variables.end(), 1);
   thrust::fill(
@@ -78,6 +79,7 @@ void bounds_update_data_t<i_t, f_t>::init_changed_constraints(const raft::handle
 template <typename i_t, typename f_t>
 void bounds_update_data_t<i_t, f_t>::prepare_for_next_iteration(const raft::handle_t* handle_ptr)
 {
+  // TODO : populate heavy_bounds_changed to 0
   std::swap(changed_constraints, next_changed_constraints);
   handle_ptr->sync_stream();
   thrust::fill(handle_ptr->get_thrust_policy(),

@@ -56,7 +56,7 @@ struct csr_data_view_t {
 
   typename mip_solver_settings_t<i_t, f_t>::tolerances_t tolerances;
 
-  static constexpr i_t work_per_block = 8 * 1024;
+  static constexpr i_t work_per_block = 16 * 1024;
 };
 
 template <typename i_t, typename f_t>

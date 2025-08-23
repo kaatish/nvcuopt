@@ -30,11 +30,14 @@ struct lb_bounds_update_data_t {
   rmm::device_uvector<f_t> cnst_slack;
   rmm::device_uvector<f_t> vars_bnd;
   rmm::device_uvector<f_t> tmp_act;
-  rmm::device_uvector<f_t> tmp_vars_bnd;
-  rmm::device_uvector<i_t> var_bounds_changed;
+  // rmm::device_uvector<f_t> tmp_vars_bnd;
+  // rmm::device_uvector<i_t> var_bounds_changed;
   rmm::device_uvector<i_t> changed_constraints;
   rmm::device_uvector<i_t> next_changed_constraints;
   rmm::device_uvector<i_t> changed_variables;
+
+  rmm::device_uvector<i_t> heavy_bounds_changed_agg;
+  rmm::device_uvector<i_t> heavy_bounds_changed;
 
   struct view_t {
     using f_t2 = typename type_2<f_t>::type;
@@ -42,11 +45,14 @@ struct lb_bounds_update_data_t {
     raft::device_span<f_t2> cnst_slack;
     raft::device_span<f_t2> vars_bnd;
     raft::device_span<f_t2> tmp_act;
-    raft::device_span<f_t2> tmp_vars_bnd;
-    raft::device_span<i_t> var_bounds_changed;
+    // raft::device_span<f_t2> tmp_vars_bnd;
+    // raft::device_span<i_t> var_bounds_changed;
     raft::device_span<i_t> changed_constraints;
     raft::device_span<i_t> next_changed_constraints;
     raft::device_span<i_t> changed_variables;
+
+    raft::device_span<i_t> heavy_bounds_changed_agg;
+    raft::device_span<i_t> heavy_bounds_changed;
   };
 
   lb_bounds_update_data_t(lb_problem_t<i_t, f_t>& problem);
@@ -56,7 +62,8 @@ struct lb_bounds_update_data_t {
               i_t n_constraints,
               i_t n_variables,
               i_t num_blocks_heavy_cnst,
-              i_t num_blocks_heavy_vars);
+              i_t num_blocks_heavy_vars,
+              i_t num_heavy_vars);
   void init_changed_constraints(const raft::handle_t* handle_ptr);
   void disable_changed_constraints(const raft::handle_t* handle_ptr);
   void prepare_for_next_iteration(const raft::handle_t* handle_ptr);

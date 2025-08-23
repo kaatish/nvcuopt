@@ -360,6 +360,7 @@ void test_multi_probe(std::string path)
   bnd_prb.calculate_activity_on_problem_bounds(problem);
   handle_.sync_stream();
   RAFT_CHECK_CUDA(handle_.get_stream());
+  cudaDeviceSynchronize();
 
   double tol = 1e-8;
   std::cout << lb_multi.upd_0.cnst_slack.size() << "\n";
@@ -383,28 +384,30 @@ void test_multi_probe(std::string path)
   auto c_sl_0 = host_copy(lb_multi.upd_0.cnst_slack);
   auto c_sl_1 = host_copy(lb_multi.upd_1.cnst_slack);
   for (int i = 0; i < lb_problem.n_constraints; ++i) {
-    auto bnd_min_slack_0 = c_ub[i] - min_act[i];
-    auto bnd_max_slack_0 = c_lb[i] - max_act[i];
+    // auto bnd_min_slack_0 = c_ub[i] - min_act[i];
+    // auto bnd_max_slack_0 = c_lb[i] - max_act[i];
+    auto bnd_min_slack_0 = min_act[i];
+    auto bnd_max_slack_0 = max_act[i];
     // auto lb_slack_0 = c_sl_0[2*i];
     // auto lb_slack_1 = c_sl_0[2*i+1];
 
-    auto lb_min_slack_0 = c_sl_0[2 * i];
-    auto lb_max_slack_0 = c_sl_0[2 * i + 1];
-    auto lb_min_slack_1 = c_sl_1[2 * i];
-    auto lb_max_slack_1 = c_sl_1[2 * i + 1];
-    if ((abs(lb_min_slack_0 - bnd_min_slack_0) / bnd_min_slack_0 > tol) ||
+    auto lb_min_slack_0 = c_ub[i] - c_sl_0[2 * i];
+    auto lb_max_slack_0 = c_lb[i] - c_sl_0[2 * i + 1];
+    auto lb_min_slack_1 = c_ub[i] - c_sl_1[2 * i];
+    auto lb_max_slack_1 = c_lb[i] - c_sl_1[2 * i + 1];
+    if ((abs(lb_min_slack_0 - bnd_min_slack_0) / abs(bnd_min_slack_0) > tol) ||
         (std::isinf(lb_min_slack_0) ^ std::isinf(bnd_min_slack_0))) {
       auto deg = off[i + 1] - off[i];
       std::cout << "min mismatch " << i << " " << bnd_min_slack_0 << " " << lb_min_slack_0
                 << "\tdiff = " << abs(bnd_min_slack_0 - lb_min_slack_0) << " " << deg << "\n";
     }
-    if ((abs(lb_max_slack_0 - bnd_max_slack_0) / bnd_max_slack_0 > tol) ||
+    if ((abs(lb_max_slack_0 - bnd_max_slack_0) / abs(bnd_max_slack_0) > tol) ||
         (std::isinf(lb_max_slack_0) ^ std::isinf(bnd_max_slack_0))) {
       auto deg = off[i + 1] - off[i];
       std::cout << "min mismatch " << i << " " << bnd_max_slack_0 << " " << lb_max_slack_0
                 << "\tdiff = " << abs(bnd_max_slack_0 - lb_max_slack_0) << " " << deg << "\n";
     }
-    if (i < 2) {
+    if (false) {
       auto deg = off[i + 1] - off[i];
       std::cout << "deg " << deg << "\n";
       std::cout << "min " << i << " " << bnd_min_slack_0 << " " << lb_min_slack_0 << " "
@@ -485,6 +488,61 @@ void test_multi_probe(std::string path)
   //   EXPECT_DOUBLE_EQ(bnd_lb_1[i], m_lb_1[i]);
   //   EXPECT_DOUBLE_EQ(bnd_ub_1[i], m_ub_1[i]);
   // }
+  cudaDeviceSynchronize();
+
+  lb_multi.calculate_bounds_update(lb_problem, problem.handle_ptr);
+
+  bnd_prb.calculate_bounds_update(problem);
+  handle_.sync_stream();
+  RAFT_CHECK_CUDA(handle_.get_stream());
+  cudaDeviceSynchronize();
+  {
+    auto roff     = host_copy(problem.reverse_offsets);
+    auto bnd_v_lb = host_copy(bnd_prb.upd.lb);
+    auto bnd_v_ub = host_copy(bnd_prb.upd.ub);
+
+    auto mpb_v_bnd = host_copy(lb_multi.upd_0.vars_bnd);
+
+    bool disp_match    = true;
+    bool disp_mismatch = true;
+    if (disp_match) {
+      for (int i = 0; i < lb_problem.n_variables; ++i) {
+        auto bnd_lb = bnd_v_lb[i];
+        auto bnd_ub = bnd_v_ub[i];
+        auto mpb_lb = mpb_v_bnd[2 * i];
+        auto mpb_ub = mpb_v_bnd[2 * i + 1];
+        bool lb_mismatch =
+          ((abs(mpb_lb - bnd_lb) / abs(bnd_lb) > tol) || (std::isinf(bnd_lb) ^ std::isinf(mpb_lb)));
+        bool ub_mismatch =
+          ((abs(mpb_ub - bnd_ub) / abs(bnd_ub) > tol) || (std::isinf(bnd_ub) ^ std::isinf(mpb_ub)));
+
+        if (!lb_mismatch && !ub_mismatch) {
+          auto deg = roff[i + 1] - roff[i];
+          std::cout << "match " << i << " " << bnd_lb << " " << bnd_ub << " " << deg << "\n";
+        }
+      }
+    }
+    if (disp_mismatch) {
+      for (int i = 0; i < lb_problem.n_variables; ++i) {
+        auto bnd_lb = bnd_v_lb[i];
+        auto bnd_ub = bnd_v_ub[i];
+        auto mpb_lb = mpb_v_bnd[2 * i];
+        auto mpb_ub = mpb_v_bnd[2 * i + 1];
+        if ((abs(mpb_lb - bnd_lb) / abs(bnd_lb) > tol) ||
+            (std::isinf(bnd_lb) ^ std::isinf(mpb_lb))) {
+          auto deg = roff[i + 1] - roff[i];
+          std::cout << "lb mismatch " << i << " " << bnd_lb << " " << mpb_lb
+                    << "\tdiff = " << abs(bnd_lb - mpb_lb) << " " << deg << "\n";
+        }
+        if ((abs(mpb_ub - bnd_ub) / abs(bnd_ub) > tol) ||
+            (std::isinf(bnd_ub) ^ std::isinf(mpb_ub))) {
+          auto deg = roff[i + 1] - roff[i];
+          std::cout << "ub mismatch " << i << " " << bnd_ub << " " << mpb_ub
+                    << "\tdiff = " << abs(bnd_ub - mpb_ub) << " " << deg << "\n";
+        }
+      }
+    }
+  }
 }
 
 TEST(presolve, multi_probe)

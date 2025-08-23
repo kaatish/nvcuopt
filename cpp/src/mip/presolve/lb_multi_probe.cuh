@@ -54,7 +54,7 @@ class lb_multi_probe_t {
   void calculate_constraint_slack_iter(lb_problem_t<i_t, f_t>& problem,
                                        const raft::handle_t* handle_ptr);
   // void calculate_activity(problem_t<i_t, f_t>& pb, const raft::handle_t* handle_ptr);
-  // bool calculate_bounds_update(problem_t<i_t, f_t>& pb, const raft::handle_t* handle_ptr);
+  void calculate_bounds_update(lb_problem_t<i_t, f_t>& pb, const raft::handle_t* handle_ptr);
   // void set_updated_bounds(problem_t<i_t, f_t>& pb,
   //                         i_t select_update,
   //                         const raft::handle_t* handle_ptr);

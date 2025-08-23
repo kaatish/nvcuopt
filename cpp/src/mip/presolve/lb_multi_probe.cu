@@ -26,6 +26,7 @@
 
 #include <cub/cub.cuh>
 #include "lb_bounds_update_kernels.cuh"
+#include "lb_kernels/lb_constraint_slack_kernels.cuh"
 #include "lb_multi_probe.cuh"
 
 namespace cuopt::linear_programming::detail {
@@ -69,6 +70,31 @@ void lb_multi_probe_t<i_t, f_t>::calculate_constraint_slack_iter(lb_problem_t<i_
       <<<num_heavy_items, 32, 0, handle_ptr->get_stream()>>>(
         problem.cnst_csr.view(), upd_0.view(), upd_1.view());
   }
+}
+
+template <typename i_t, typename f_t>
+void lb_multi_probe_t<i_t, f_t>::calculate_bounds_update(lb_problem_t<i_t, f_t>& problem,
+                                                         const raft::handle_t* handle_ptr)
+{
+  auto num_blocks = problem.vars_csr.sub_warp_block_count + problem.vars_csr.med_block_count +
+                    problem.vars_csr.num_blocks_heavy;
+  std::cout << "call_bnd_update sub_warp_block_count " << problem.vars_csr.sub_warp_block_count
+            << "\n";
+  std::cout << "call_bnd_update med_block_count " << problem.vars_csr.med_block_count << "\n";
+  std::cout << "call_bnd_update num_blocks_heavy " << problem.vars_csr.num_blocks_heavy << "\n";
+
+  std::cout << "call_bnd_update sub_warp+med "
+            << problem.vars_csr.sub_warp_block_count + problem.vars_csr.med_block_count << "\n";
+
+  std::cout << "num_heavy_items " << problem.n_variables - problem.vars_csr.heavy_beg_id << "\n";
+  call_bnd_update<i_t, f_t, 512><<<num_blocks, 512, 0, handle_ptr->get_stream()>>>(
+    problem.vars_csr.view(), upd_0.view(), upd_1.view());
+  // if (problem.vars_csr.num_blocks_heavy != 0) {
+  //   auto num_heavy_items = problem.n_constraints - problem.vars_csr.heavy_beg_id;
+  //   finalize_cnst_heavy<erase_inf_cnst, i_t, f_t, 32>
+  //     <<<num_heavy_items, 32, 0, handle_ptr->get_stream()>>>(
+  //       problem.vars_csr.view(), upd_0.view(), upd_1.view());
+  // }
 }
 
 #if MIP_INSTANTIATE_FLOAT
