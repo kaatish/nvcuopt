@@ -143,18 +143,16 @@ __device__ thrust::pair<f_t2, f_t2> update_bounds(csr_view_t view,
     auto cnst_slack_0 = upd_0.cnst_slack[cnst_idx];
     //  don't propagate over constraints that are infeasible
     // TODO : write changed_constraints = 0 for infeasible constraints while calculating activity
-    if ((upd_0.changed_constraints[cnst_idx] == 0) || isnan(cnst_slack_0.x)) {
-      continue;
-    } else {
+    bool skip_cnst_0 = ((upd_0.changed_constraints[cnst_idx] == 0) || isnan(cnst_slack_0.x));
+    if (!skip_cnst_0) {
       bounds_0 = update_bounds_per_cnst(coeff, cnst_slack_0, old_bounds_0, bounds_0);
     }
 
     auto cnst_slack_1 = upd_1.cnst_slack[cnst_idx];
+    bool skip_cnst_1  = ((upd_1.changed_constraints[cnst_idx] == 0) || isnan(cnst_slack_1.x));
     //  don't propagate over constraints that are infeasible
     // TODO : write changed_constraints = 0 for infeasible constraints while calculating activity
-    if ((upd_1.changed_constraints[cnst_idx] == 0) || isnan(cnst_slack_1.x)) {
-      continue;
-    } else {
+    if (!skip_cnst_1) {
       bounds_1 = update_bounds_per_cnst(coeff, cnst_slack_1, old_bounds_1, bounds_1);
     }
   }
@@ -162,14 +160,10 @@ __device__ thrust::pair<f_t2, f_t2> update_bounds(csr_view_t view,
   return thrust::make_pair(bounds_0, bounds_1);
 }
 
-template <typename f_t, int BDIM, typename i_t, typename csr_view_t, typename upd_view_t>
-__global__ void bnd_heavy_update_next_changed_constraints(i_t id_block_beg,
-                                                          i_t id_range_end,
-                                                          i_t work_per_block,
-                                                          csr_view_t view,
+template <typename i_t, typename f_t, int BDIM, typename csr_view_t, typename upd_view_t>
+__global__ void bnd_heavy_update_next_changed_constraints(csr_view_t view,
                                                           upd_view_t upd0,
-                                                          upd_view_t upd1,
-                                                          reduction_storage_t<f_t, BDIM>& storage)
+                                                          upd_view_t upd1)
 {
   auto idx = view.heavy_vertex_ids[blockIdx.x] + view.heavy_beg_id;
 
@@ -189,16 +183,16 @@ __global__ void bnd_heavy_update_next_changed_constraints(i_t id_block_beg,
 
   if (!(changed_0 && changed_1)) { return; }
 
-  i_t item_off_beg = view.offsets[idx] + work_per_block * pseudo_block_id;
-  i_t item_off_end = min(item_off_beg + work_per_block, view.offsets[idx + 1]);
+  i_t tid          = threadIdx.x;
+  i_t item_off_beg = view.offsets[idx] + view.work_per_block * pseudo_block_id;
+  i_t item_off_end = min(item_off_beg + view.work_per_block, view.offsets[idx + 1]);
 
   if (changed_0 && changed_1) {
-    update_next_changed_constraints<BDIM>(
-      view, upd0, upd1, threadIdx.x, item_off_beg, item_off_end);
+    update_next_changed_constraints<BDIM>(view, upd0, upd1, tid, item_off_beg, item_off_end);
   } else if (changed_0) {
-    update_next_changed_constraints<BDIM>(view, upd0, threadIdx.x, item_off_beg, item_off_end);
+    update_next_changed_constraints<BDIM>(view, upd0, tid, item_off_beg, item_off_end);
   } else if (changed_1) {
-    update_next_changed_constraints<BDIM>(view, upd1, threadIdx.x, item_off_beg, item_off_end);
+    update_next_changed_constraints<BDIM>(view, upd1, tid, item_off_beg, item_off_end);
   }
 }
 

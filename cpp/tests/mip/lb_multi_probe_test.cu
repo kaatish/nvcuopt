@@ -201,7 +201,7 @@ std::tuple<std::vector<int>, std::vector<double>, std::vector<double>> select_k_
   detail::problem_t<int, double>& problem, int sample_size)
 {
   auto seed = std::random_device{}();
-  std::cerr << "Tested with seed " << seed << "\n";
+  std::cout << "Tested with seed " << seed << "\n";
   problem.compute_n_integer_vars();
   auto v_lb       = host_copy(problem.variable_lower_bounds);
   auto v_ub       = host_copy(problem.variable_upper_bounds);
@@ -291,7 +291,8 @@ bounds_probe_results(detail::bound_presolve_t<int, double>& bnd_prb_0,
 //     std::move(h_lb_0), std::move(h_ub_0), std::move(h_lb_1), std::move(h_ub_1));
 // }
 
-void test_multi_probe(std::string path)
+#if 0
+void old_test_multi_probe(std::string path)
 {
   auto memory_resource = make_async();
   rmm::mr::set_current_device_resource(memory_resource.get());
@@ -416,78 +417,6 @@ void test_multi_probe(std::string path)
                 << lb_max_slack_1 << "\n";
     }
   }
-  // for (int i = 0; i < lb_problem.n_constraints; ++i) {
-  //   //auto bnd_slack_0 = c_ub[i] - min_act[i];
-  //   //auto bnd_slack_1 = c_lb[i] - max_act[i];
-  //   //auto lb_slack_0 = c_sl_0[2*i];
-  //   //auto lb_slack_1 = c_sl_0[2*i+1];
-
-  //  //auto lb_min_act_0 = c_ub[i] - c_sl_0[2*i];
-  //  //auto lb_max_act_0 = c_lb[i] - c_sl_0[2*i+1];
-  //  //auto lb_min_act_1 = c_ub[i] - c_sl_1[2*i];
-  //  //auto lb_max_act_1 = c_lb[i] - c_sl_1[2*i+1];
-  //  auto lb_min_act_0 = c_sl_0[2*i];
-  //  auto lb_max_act_0 = c_sl_0[2*i+1];
-  //  auto lb_min_act_1 = c_sl_1[2*i];
-  //  auto lb_max_act_1 = c_sl_1[2*i+1];
-  //  //if (abs(lb_slack_0 - bnd_slack_0)/bnd_slack_0 > tol) {
-  //  if ((abs(lb_min_act_0 - min_act[i])/min_act[i] > tol) || (std::isinf(lb_min_act_0) ^
-  //  std::isinf(min_act[i]))) {
-  //    auto deg = off[i+1] - off[i];
-  //    std::cout<<"min mismatch "<<i<<" "<<min_act[i]<<" "<<lb_min_act_0<<"\tdiff =
-  //    "<<abs(min_act[i] - lb_min_act_0)<<" "<<deg<<"\n";
-  //  }
-  //  //if (abs(lb_slack_1 - bnd_slack_1)/bnd_slack_1 > tol) {
-  //  if ((abs(lb_max_act_0 - max_act[i])/max_act[i] > tol) || (std::isinf(lb_max_act_0) ^
-  //  std::isinf(max_act[i]))) {
-  //    auto deg = off[i+1] - off[i];
-  //    std::cout<<"max mismatch "<<i<<" "<<max_act[i]<<" "<<lb_max_act_0<<"\tdiff =
-  //    "<<abs(max_act[i] - lb_max_act_0)<<" "<<deg<<"\n";
-  //  }
-  //  if (i < 2)
-  //  {
-  //    auto deg = off[i+1] - off[i];
-  //    std::cout<<"deg "<<deg<<"\n";
-  //    std::cout<<"min "<<i<<" "<<min_act[i]<<" "<<lb_min_act_0<<" "<<lb_min_act_1<<"\n";
-  //    std::cout<<"max "<<i<<" "<<max_act[i]<<" "<<lb_max_act_0<<" "<<lb_max_act_1<<"\n";
-  //  }
-  //}
-
-  // auto lb_sl = lb_multi.
-  //  detail::bound_presolve_t<int, double> bnd_prb_1(solver.context);
-  //  detail::multi_probe_t<int, double> multi_probe_prs(solver.context);
-
-  // auto probe_tuple       = select_k_random(problem, 100);
-  // auto bounds_probe_vals = convert_probe_tuple(probe_tuple);
-
-  // auto [bnd_lb_0, bnd_ub_0, bnd_lb_1, bnd_ub_1] =
-  //   bounds_probe_results(bnd_prb_0, bnd_prb_1, problem, bounds_probe_vals);
-  // auto [m_lb_0, m_ub_0, m_lb_1, m_ub_1] =
-  //   multi_probe_results(multi_probe_prs, problem, probe_tuple);
-
-  // auto bnd_min_act_0 = host_copy(bnd_prb_0.upd.min_activity);
-  // auto bnd_max_act_0 = host_copy(bnd_prb_0.upd.max_activity);
-  // auto bnd_min_act_1 = host_copy(bnd_prb_1.upd.min_activity);
-  // auto bnd_max_act_1 = host_copy(bnd_prb_1.upd.max_activity);
-
-  // auto mlp_min_act_0 = host_copy(multi_probe_prs.upd_0.min_activity);
-  // auto mlp_max_act_0 = host_copy(multi_probe_prs.upd_0.max_activity);
-  // auto mlp_min_act_1 = host_copy(multi_probe_prs.upd_1.min_activity);
-  // auto mlp_max_act_1 = host_copy(multi_probe_prs.upd_1.max_activity);
-
-  // for (int i = 0; i < (int)bnd_min_act_0.size(); ++i) {
-  //   EXPECT_DOUBLE_EQ(bnd_min_act_0[i], mlp_min_act_0[i]);
-  //   EXPECT_DOUBLE_EQ(bnd_max_act_0[i], mlp_max_act_0[i]);
-  //   EXPECT_DOUBLE_EQ(bnd_min_act_1[i], mlp_min_act_1[i]);
-  //   EXPECT_DOUBLE_EQ(bnd_max_act_1[i], mlp_max_act_1[i]);
-  // }
-
-  // for (int i = 0; i < (int)bnd_lb_0.size(); ++i) {
-  //   EXPECT_DOUBLE_EQ(bnd_lb_0[i], m_lb_0[i]);
-  //   EXPECT_DOUBLE_EQ(bnd_ub_0[i], m_ub_0[i]);
-  //   EXPECT_DOUBLE_EQ(bnd_lb_1[i], m_lb_1[i]);
-  //   EXPECT_DOUBLE_EQ(bnd_ub_1[i], m_ub_1[i]);
-  // }
   cudaDeviceSynchronize();
 
   lb_multi.calculate_bounds_update(lb_problem, problem.handle_ptr);
@@ -542,6 +471,239 @@ void test_multi_probe(std::string path)
         }
       }
     }
+  }
+}
+#endif
+
+bool test_bounds(detail::problem_t<int, double>& problem,
+                 detail::lb_bounds_update_data_t<int, double>& lb_upd,
+                 detail::bounds_update_data_t<int, double>& upd)
+{
+  auto stream    = problem.handle_ptr->get_stream();
+  auto chg       = host_copy(upd.changed_variables, stream);
+  auto lb_chg    = host_copy(lb_upd.changed_variables, stream);
+  auto bnd_lb    = host_copy(upd.lb, stream);
+  auto bnd_ub    = host_copy(upd.ub, stream);
+  auto mpb_v_bnd = host_copy(lb_upd.vars_bnd, stream);
+
+  auto orig_lb = host_copy(problem.variable_lower_bounds, stream);
+  auto orig_ub = host_copy(problem.variable_upper_bounds, stream);
+
+  auto off = host_copy(problem.reverse_offsets, stream);
+
+  bool passed = true;
+  double tol  = 1e-8;
+  for (int i = 0; i < problem.n_variables; ++i) {
+    // if (lb_chg[i]) {
+    if (i == 257) { std::cout << "var change " << chg[i] << " " << lb_chg[i] << "\n"; }
+    if (chg[i] != lb_chg[i]) {
+      std::cout << " changed mismatch " << i << "\n";
+      passed = false;
+      continue;
+    }
+    if (chg[i]) {
+      auto v_lb = bnd_lb[i];
+      auto v_ub = bnd_ub[i];
+
+      auto mpb_lb = mpb_v_bnd[2 * i];
+      auto mpb_ub = mpb_v_bnd[2 * i + 1];
+
+      bool lb_mismatch =
+        ((abs(mpb_lb - v_lb) / abs(v_lb) > tol) || (std::isinf(v_lb) ^ std::isinf(mpb_lb)));
+      bool ub_mismatch =
+        ((abs(mpb_ub - v_ub) / abs(v_ub) > tol) || (std::isinf(v_ub) ^ std::isinf(mpb_ub)));
+
+      if (lb_mismatch) {
+        auto deg = off[i + 1] - off[i];
+        std::cout << "lb mismatch " << i << " " << v_lb << " " << mpb_lb
+                  << "\tdiff = " << abs(v_lb - mpb_lb) << " " << orig_lb[i] << " " << deg << "\n";
+        passed = false;
+      }
+      if (ub_mismatch) {
+        auto deg = off[i + 1] - off[i];
+        std::cout << "ub mismatch " << i << " " << v_ub << " " << mpb_ub
+                  << "\tdiff = " << abs(v_ub - mpb_ub) << " " << orig_ub[i] << " " << deg << "\n";
+        passed = false;
+      }
+    }
+  }
+  return passed;
+}
+
+bool test_activity(detail::problem_t<int, double>& problem,
+                   detail::lb_bounds_update_data_t<int, double>& lb_upd,
+                   detail::bounds_update_data_t<int, double>& upd)
+{
+  problem.handle_ptr->sync_stream();
+  auto stream  = problem.handle_ptr->get_stream();
+  auto chg     = host_copy(upd.changed_constraints, stream);
+  auto lb_chg  = host_copy(lb_upd.changed_constraints, stream);
+  auto min_act = host_copy(upd.min_activity, stream);
+  auto max_act = host_copy(upd.max_activity, stream);
+  auto c_lb    = host_copy(problem.constraint_lower_bounds, stream);
+  auto c_ub    = host_copy(problem.constraint_upper_bounds, stream);
+  auto off     = host_copy(problem.offsets, stream);
+
+  auto c_sl   = host_copy(lb_upd.cnst_slack, stream);
+  bool passed = true;
+  double tol  = 1e-8;
+  for (int i = 0; i < problem.n_constraints; ++i) {
+    // if (lb_chg[i]) {
+    if (chg[i] != lb_chg[i]) {
+      std::cout << " changed mismatch " << i << "\n";
+      passed = false;
+      continue;
+    }
+    if (chg[i]) {
+      auto bnd_min_slack = min_act[i];
+      auto bnd_max_slack = max_act[i];
+      auto lb_min_slack  = c_ub[i] - c_sl[2 * i];
+      auto lb_max_slack  = c_lb[i] - c_sl[2 * i + 1];
+      if ((abs(lb_min_slack - bnd_min_slack) / abs(bnd_min_slack) > tol) ||
+          (std::isinf(lb_min_slack) ^ std::isinf(bnd_min_slack))) {
+        auto deg = off[i + 1] - off[i];
+        std::cout << "min mismatch " << i << " " << bnd_min_slack << " " << lb_min_slack
+                  << "\tdiff = " << abs(bnd_min_slack - lb_min_slack) << " " << deg << " " << chg[i]
+                  << "\n";
+        passed = false;
+      }
+      if ((abs(lb_max_slack - bnd_max_slack) / abs(bnd_max_slack) > tol) ||
+          (std::isinf(lb_max_slack) ^ std::isinf(bnd_max_slack))) {
+        auto deg = off[i + 1] - off[i];
+        std::cout << "max mismatch " << i << " " << bnd_max_slack << " " << lb_max_slack
+                  << "\tdiff = " << abs(bnd_max_slack - lb_max_slack) << " " << deg << " " << chg[i]
+                  << "\n";
+        passed = false;
+      }
+    }
+  }
+  return passed;
+}
+
+bool test_activity(detail::lb_multi_probe_t<int, double>& lb_multi,
+                   detail::multi_probe_t<int, double>& multi)
+{
+  multi.context.handle_ptr->sync_stream();
+  std::cout << "act test 0\n";
+  bool passed_0 = test_activity(*(multi.context.problem_ptr), lb_multi.upd_0, multi.upd_0);
+  std::cout << "act test 1\n";
+  bool passed_1 = test_activity(*(multi.context.problem_ptr), lb_multi.upd_1, multi.upd_1);
+  return passed_0 && passed_1;
+}
+
+bool test_bounds(detail::lb_multi_probe_t<int, double>& lb_multi,
+                 detail::multi_probe_t<int, double>& multi)
+{
+  multi.context.handle_ptr->sync_stream();
+  std::cout << "lb test 0\n";
+  bool passed_0 = test_bounds(*(multi.context.problem_ptr), lb_multi.upd_0, multi.upd_0);
+  std::cout << "lb test 1\n";
+  bool passed_1 = test_bounds(*(multi.context.problem_ptr), lb_multi.upd_1, multi.upd_1);
+  return passed_0 && passed_1;
+}
+
+void randomize_changed_constraints(rmm::device_uvector<int>& changed_constraints,
+                                   int64_t seed,
+                                   const raft::handle_t* handle_ptr)
+{
+  std::cout << "Tested with seed " << seed << "\n";
+  std::mt19937 rng(seed);
+  std::vector<int> h_cc;
+  h_cc.reserve(changed_constraints.size());
+  std::uniform_int_distribution<int> dist(0, 1);
+  for (size_t i = 0; i < changed_constraints.size(); ++i) {
+    h_cc.push_back(dist(rng));
+  }
+  device_copy(changed_constraints, h_cc, handle_ptr->get_stream());
+}
+
+void flip_changed_constraints(rmm::device_uvector<int>& changed_constraints,
+                              const raft::handle_t* handle_ptr)
+{
+  std::vector<int> h_cc(changed_constraints.size(), 1);
+  h_cc[0] = 0;
+  device_copy(changed_constraints, h_cc, handle_ptr->get_stream());
+}
+
+void test_multi_probe(std::string path)
+{
+  auto memory_resource = make_async();
+  rmm::mr::set_current_device_resource(memory_resource.get());
+  const raft::handle_t handle_{};
+  cuopt::mps_parser::mps_data_model_t<int, double> mps_problem =
+    cuopt::mps_parser::parse_mps<int, double>(path, false);
+  handle_.sync_stream();
+  auto op_problem = mps_data_model_to_optimization_problem(&handle_, mps_problem);
+  problem_checking_t<int, double>::check_problem_representation(op_problem);
+  detail::problem_t<int, double> problem(op_problem);
+  problem.preprocess_problem();
+  detail::trivial_presolve(problem);
+
+  detail::lb_problem_t<int, double> lb_problem(problem);
+  mip_solver_settings_t<int, double> default_settings{};
+  detail::pdhg_solver_t<int, double> pdhg_solver(problem.handle_ptr, problem);
+  detail::pdlp_initial_scaling_strategy_t<int, double> scaling(&handle_,
+                                                               problem,
+                                                               10,
+                                                               1.0,
+                                                               pdhg_solver,
+                                                               problem.reverse_coefficients,
+                                                               problem.reverse_offsets,
+                                                               problem.reverse_constraints,
+                                                               true);
+  detail::mip_solver_t<int, double> solver(problem, default_settings, scaling, cuopt::timer_t(0));
+  detail::multi_probe_t<int, double> multi(solver.context);
+  {
+    // setup multi_probe
+    multi.copy_problem_into_probing_buffers(problem, &handle_);
+    multi.upd_0.init_changed_constraints(&handle_);
+    multi.upd_1.init_changed_constraints(&handle_);
+    // flip_changed_constraints(multi.upd_0.changed_constraints, &handle_);
+
+    // int64_t seed_0 = std::random_device{}();
+    // int64_t seed_1 = std::random_device{}();
+
+    int64_t seed_0 = 2635300626ul;
+    int64_t seed_1 = 1891299292ul;
+
+    randomize_changed_constraints(multi.upd_0.changed_constraints, seed_0, &handle_);
+    randomize_changed_constraints(multi.upd_1.changed_constraints, seed_1, &handle_);
+    handle_.sync_stream();
+  }
+
+  detail::lb_multi_probe_t<int, double> lb_multi(solver.context, lb_problem);
+  {
+    // setup lb multi_probe
+    lb_multi.copy_problem_into_probing_buffers(lb_problem, &handle_);
+
+    lb_multi.upd_0.init_changed_constraints(&handle_);
+    lb_multi.upd_1.init_changed_constraints(&handle_);
+
+    // overwrite changed constraints for comparison
+    raft::copy(lb_multi.upd_0.changed_constraints.data(),
+               multi.upd_0.changed_constraints.data(),
+               multi.upd_0.changed_constraints.size(),
+               handle_.get_stream());
+    raft::copy(lb_multi.upd_1.changed_constraints.data(),
+               multi.upd_1.changed_constraints.data(),
+               multi.upd_1.changed_constraints.size(),
+               handle_.get_stream());
+    handle_.sync_stream();
+  }
+
+  multi.calculate_activity(problem, &handle_);
+  lb_multi.calculate_constraint_slack_iter(lb_problem, problem.handle_ptr);
+
+  multi.calculate_bounds_update(problem, problem.handle_ptr);
+  lb_multi.calculate_bounds_update(lb_problem, problem.handle_ptr);
+
+  bool act_passed = test_activity(lb_multi, multi);
+  bool bnd_passed = test_bounds(lb_multi, multi);
+
+  if (act_passed && bnd_passed) {
+    std::cout << "Passed\n";
+  } else {
+    std::cout << "Not passed\n";
   }
 }
 
