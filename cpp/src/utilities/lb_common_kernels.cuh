@@ -130,13 +130,13 @@ struct warp_reduce_t {
   {
     f_t2 out0, out1;
     out0.x = warp_reduce(temp_storage[4 * (threadIdx.x / MAX_EDGE_PER_CNST) + 0])
-               .Reduce(thrust::get<0>(in).x, cub::Max());
+               .Reduce(thrust::get<0>(in).x, cuda::maximum());
     out0.y = warp_reduce(temp_storage[4 * (threadIdx.x / MAX_EDGE_PER_CNST) + 1])
-               .Reduce(thrust::get<0>(in).y, cub::Min());
+               .Reduce(thrust::get<0>(in).y, cuda::minimum());
     out1.x = warp_reduce(temp_storage[4 * (threadIdx.x / MAX_EDGE_PER_CNST) + 2])
-               .Reduce(thrust::get<1>(in).x, cub::Max());
+               .Reduce(thrust::get<1>(in).x, cuda::maximum());
     out1.y = warp_reduce(temp_storage[4 * (threadIdx.x / MAX_EDGE_PER_CNST) + 3])
-               .Reduce(thrust::get<1>(in).y, cub::Min());
+               .Reduce(thrust::get<1>(in).y, cuda::minimum());
     return thrust::make_pair(out0, out1);
   }
 
@@ -158,23 +158,23 @@ struct warp_reduce_t {
   {
     f_t2 out0, out1;
     out0.x = warp_reduce(temp_storage[4 * (threadIdx.x / MAX_EDGE_PER_CNST) + 0])
-               .Reduce(thrust::get<0>(in).x, cub::Max(), valid_items);
+               .Reduce(thrust::get<0>(in).x, cuda::maximum(), valid_items);
     out0.y = warp_reduce(temp_storage[4 * (threadIdx.x / MAX_EDGE_PER_CNST) + 1])
-               .Reduce(thrust::get<0>(in).y, cub::Min(), valid_items);
+               .Reduce(thrust::get<0>(in).y, cuda::minimum(), valid_items);
     out1.x = warp_reduce(temp_storage[4 * (threadIdx.x / MAX_EDGE_PER_CNST) + 2])
-               .Reduce(thrust::get<1>(in).x, cub::Max(), valid_items);
+               .Reduce(thrust::get<1>(in).x, cuda::maximum(), valid_items);
     out1.y = warp_reduce(temp_storage[4 * (threadIdx.x / MAX_EDGE_PER_CNST) + 3])
-               .Reduce(thrust::get<1>(in).y, cub::Min(), valid_items);
+               .Reduce(thrust::get<1>(in).y, cuda::minimum(), valid_items);
     return thrust::make_pair(out0, out1);
   }
 
   inline __device__ f_t2 max_min(f_t2& in)
   {
     f_t2 out;
-    out.x =
-      warp_reduce(temp_storage[4 * (threadIdx.x / MAX_EDGE_PER_CNST) + 0]).Reduce(in.x, cub::Max());
-    out.y =
-      warp_reduce(temp_storage[4 * (threadIdx.x / MAX_EDGE_PER_CNST) + 1]).Reduce(in.y, cub::Max());
+    out.x = warp_reduce(temp_storage[4 * (threadIdx.x / MAX_EDGE_PER_CNST) + 0])
+              .Reduce(in.x, cuda::maximum());
+    out.y = warp_reduce(temp_storage[4 * (threadIdx.x / MAX_EDGE_PER_CNST) + 1])
+              .Reduce(in.y, cuda::minimum());
     return out;
   }
 
@@ -210,22 +210,22 @@ struct block_reduce_t {
   inline __device__ f_t2 max_min(f_t2& in)
   {
     f_t2 out;
-    out.x = block_reduce(temp_storage).Reduce(in.x, cub::Max());
+    out.x = block_reduce(temp_storage).Reduce(in.x, cuda::maximum());
     __syncthreads();
-    out.y = block_reduce(temp_storage).Reduce(in.y, cub::Min());
+    out.y = block_reduce(temp_storage).Reduce(in.y, cuda::minimum());
     return out;
   }
 
   inline __device__ thrust::pair<f_t2, f_t2> max_min(thrust::pair<f_t2, f_t2>& in)
   {
     f_t2 out0, out1;
-    out0.x = block_reduce(temp_storage).Reduce(thrust::get<0>(in).x, cub::Max());
+    out0.x = block_reduce(temp_storage).Reduce(thrust::get<0>(in).x, cuda::maximum());
     __syncthreads();
-    out0.y = block_reduce(temp_storage).Reduce(thrust::get<0>(in).y, cub::Min());
+    out0.y = block_reduce(temp_storage).Reduce(thrust::get<0>(in).y, cuda::minimum());
     __syncthreads();
-    out1.x = block_reduce(temp_storage).Reduce(thrust::get<1>(in).x, cub::Max());
+    out1.x = block_reduce(temp_storage).Reduce(thrust::get<1>(in).x, cuda::maximum());
     __syncthreads();
-    out1.y = block_reduce(temp_storage).Reduce(thrust::get<1>(in).y, cub::Min());
+    out1.y = block_reduce(temp_storage).Reduce(thrust::get<1>(in).y, cuda::minimum());
     return thrust::make_pair(out0, out1);
   }
 

@@ -73,9 +73,7 @@ void lb_bounds_update_data_t<i_t, f_t>::resize(const raft::handle_t* handle_ptr,
   cnst_slack.resize(2 * n_constraints, handle_ptr->get_stream());
   tmp_act.resize(2 * num_blocks_heavy_cnst, handle_ptr->get_stream());
   vars_bnd.resize(2 * n_variables, handle_ptr->get_stream());
-  // tmp_vars_bnd.resize(2 * num_blocks_heavy_vars, handle_ptr->get_stream());
 
-  // var_bounds_changed.resize(n_variables, handle_ptr->get_stream());
   changed_constraints.resize(n_constraints, handle_ptr->get_stream());
   next_changed_constraints.resize(n_constraints, handle_ptr->get_stream());
   changed_variables.resize(n_variables, handle_ptr->get_stream());
@@ -88,12 +86,10 @@ template <typename i_t, typename f_t>
 typename lb_bounds_update_data_t<i_t, f_t>::view_t lb_bounds_update_data_t<i_t, f_t>::view()
 {
   view_t v;
-  v.bounds_changed = bounds_changed.data();
-  v.cnst_slack     = make_span_2(cnst_slack);
-  v.vars_bnd       = make_span_2(vars_bnd);
-  v.tmp_act        = make_span_2(tmp_act);
-  // v.tmp_vars_bnd             = make_span_2(tmp_vars_bnd);
-  // v.var_bounds_changed       = make_span(var_bounds_changed);
+  v.bounds_changed           = bounds_changed.data();
+  v.cnst_slack               = make_span_2(cnst_slack);
+  v.vars_bnd                 = make_span_2(vars_bnd);
+  v.tmp_act                  = make_span_2(tmp_act);
   v.changed_constraints      = make_span(changed_constraints);
   v.next_changed_constraints = make_span(next_changed_constraints);
   v.changed_variables        = make_span(changed_variables);
@@ -106,8 +102,6 @@ typename lb_bounds_update_data_t<i_t, f_t>::view_t lb_bounds_update_data_t<i_t, 
 template <typename i_t, typename f_t>
 void lb_bounds_update_data_t<i_t, f_t>::init_changed_constraints(const raft::handle_t* handle_ptr)
 {
-  // thrust::fill(
-  //   handle_ptr->get_thrust_policy(), var_bounds_changed.begin(), var_bounds_changed.end(), 0);
   thrust::fill(
     handle_ptr->get_thrust_policy(), changed_variables.begin(), changed_variables.end(), 1);
   thrust::fill(
@@ -116,14 +110,18 @@ void lb_bounds_update_data_t<i_t, f_t>::init_changed_constraints(const raft::han
                next_changed_constraints.begin(),
                next_changed_constraints.end(),
                0);
+  thrust::fill(handle_ptr->get_thrust_policy(),
+               heavy_bounds_changed_agg.begin(),
+               heavy_bounds_changed_agg.end(),
+               0);
+  thrust::fill(
+    handle_ptr->get_thrust_policy(), heavy_bounds_changed.begin(), heavy_bounds_changed.end(), 0);
 }
 
 template <typename i_t, typename f_t>
 void lb_bounds_update_data_t<i_t, f_t>::disable_changed_constraints(
   const raft::handle_t* handle_ptr)
 {
-  // thrust::fill(
-  //   handle_ptr->get_thrust_policy(), var_bounds_changed.begin(), var_bounds_changed.end(), 0);
   thrust::fill(
     handle_ptr->get_thrust_policy(), changed_variables.begin(), changed_variables.end(), 1);
   thrust::fill(
@@ -145,8 +143,12 @@ void lb_bounds_update_data_t<i_t, f_t>::prepare_for_next_iteration(const raft::h
                0);
   thrust::fill(
     handle_ptr->get_thrust_policy(), changed_variables.begin(), changed_variables.end(), 0);
-  // thrust::fill(
-  //   handle_ptr->get_thrust_policy(), var_bounds_changed.begin(), var_bounds_changed.end(), 0);
+  thrust::fill(handle_ptr->get_thrust_policy(),
+               heavy_bounds_changed_agg.begin(),
+               heavy_bounds_changed_agg.end(),
+               0);
+  thrust::fill(
+    handle_ptr->get_thrust_policy(), heavy_bounds_changed.begin(), heavy_bounds_changed.end(), 0);
 }
 
 #if MIP_INSTANTIATE_FLOAT

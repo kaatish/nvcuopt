@@ -30,8 +30,6 @@ struct lb_bounds_update_data_t {
   rmm::device_uvector<f_t> cnst_slack;
   rmm::device_uvector<f_t> vars_bnd;
   rmm::device_uvector<f_t> tmp_act;
-  // rmm::device_uvector<f_t> tmp_vars_bnd;
-  // rmm::device_uvector<i_t> var_bounds_changed;
   rmm::device_uvector<i_t> changed_constraints;
   rmm::device_uvector<i_t> next_changed_constraints;
   rmm::device_uvector<i_t> changed_variables;
@@ -45,8 +43,6 @@ struct lb_bounds_update_data_t {
     raft::device_span<f_t2> cnst_slack;
     raft::device_span<f_t2> vars_bnd;
     raft::device_span<f_t2> tmp_act;
-    // raft::device_span<f_t2> tmp_vars_bnd;
-    // raft::device_span<i_t> var_bounds_changed;
     raft::device_span<i_t> changed_constraints;
     raft::device_span<i_t> next_changed_constraints;
     raft::device_span<i_t> changed_variables;

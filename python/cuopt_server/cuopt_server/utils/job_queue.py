@@ -60,47 +60,6 @@ class PickleForbidden(Exception):
 msgpack_numpy.patch()
 
 
-def lp_datamodel_compat(data):
-    """
-    Maintain backward compat for some parameters
-    that change names in 25.05. Replace the
-    old parameters with the new names
-    """
-
-    sc = {
-        "solver_mode": "pdlp_solver_mode",
-        "heuristics_only": "mip_heuristics_only",
-    }
-
-    tol = {
-        "integrality_tolerance": "mip_integrality_tolerance",
-        "absolute_mip_gap": "mip_absolute_gap",
-        "relative_mip_gap": "mip_relative_gap",
-    }
-
-    replace = []
-    if "solver_config" in data:
-        s = data["solver_config"]
-        for k, v in sc.items():
-            if k in s:
-                replace.append([k, v, s[k]])
-
-        for r in replace:
-            data["solver_config"][r[1]] = r[2]
-            del data["solver_config"][r[0]]
-
-        replace = []
-        if "tolerances" in s:
-            t = s["tolerances"]
-            for k, v in tol.items():
-                if k in t:
-                    replace.append([k, v, t[k]])
-
-            for r in replace:
-                data["solver_config"]["tolerances"][r[1]] = r[2]
-                del data["solver_config"]["tolerances"][r[0]]
-
-
 def check_client_version(client_vers):
     logging.debug(f"client_vers is {client_vers} in check")
     if os.environ.get("CUOPT_CHECK_CLIENT", True) in ["True", True]:
@@ -110,7 +69,7 @@ def check_client_version(client_vers):
             return []
         cv = client_vers.split(".")
         if len(cv) < 2:
-            logging.warn("Client version missing or bad format")
+            logging.warning("Client version missing or bad format")
             return [
                 f"Client version missing or not the current format. "
                 f"Please upgrade your cuOpt client to '{major}.{minor}', "
@@ -121,7 +80,7 @@ def check_client_version(client_vers):
             cmajor, cminor = cv[:2]
             matches = (cmajor, cminor) == (major, minor)
         if not matches:
-            logging.warn(f"Client version {cmajor}.{cminor} does not match")
+            logging.warning(f"Client version {cmajor}.{cminor} does not match")
             return [
                 f"Client version is '{cmajor}.{cminor}' but server "
                 f"version is '{major}.{minor}'. Please use a matching client."
@@ -569,7 +528,7 @@ class BaseResult:
         # we know when the list has reached empty again
         # we can send the sentinel value
         if self.is_done():
-            logging.warn("Incumbent added after job marked done!")
+            logging.warning("Incumbent added after job marked done!")
         sol["solution"] = sol["solution"].tolist()
         self.incumbents.append(sol)
 
@@ -636,7 +595,7 @@ class BinaryJobResult(BaseResult):
 
         # might as well make sure these match
         if rtype != self.rtype:
-            logging.warn(
+            logging.warning(
                 "in set_data_size_and_type result mime_type "
                 f"does not match, updating {rtype} {self.rtype}"
             )
@@ -872,7 +831,7 @@ class SolverJob(SolverBaseJob):
                 )
             logging.debug(
                 message(
-                    "feature check succeeeded for tier '%s', "
+                    "feature check succeeded for tier '%s', "
                     % request_filter.get_tier()
                 )
             )
@@ -1202,7 +1161,7 @@ class SolverBinaryJob:
         self.warmstart_data = warmstart_data
 
     def delete_data(self):
-        # This is for cases where we skip a job on cancelation
+        # This is for cases where we skip a job on cancellation
         # In this case for shared memory use, we need
         # to unlink the shared memory if it is not a cache
         # reference because we will never call _resolve_job
@@ -1289,7 +1248,6 @@ class SolverBinaryJob:
                         t = SolverLPJob(0, i_data, None, None)
                         t._transform(t.LP_data)
                         i_data = t.get_data()
-                        lp_datamodel_compat(i_data)
                         lpdata.append(LPData.parse_obj(i_data))
                     data = lpdata
                 else:
@@ -1299,7 +1257,6 @@ class SolverBinaryJob:
                     t = SolverLPJob(0, data, None, None)
                     t._transform(t.LP_data)
                     data = t.get_data()
-                    lp_datamodel_compat(data)
                     data = LPData.parse_obj(data)
             except Exception as e:
                 raise HTTPException(
@@ -1445,7 +1402,7 @@ class SolverBinaryJobPath(SolverBinaryJob):
                 "Pickle data format is deprecated. "
                 "Use zlib, msgpack, or plain JSON"
             )
-            logging.warn("pickle data is deprecated")
+            logging.warning("pickle data is deprecated")
             logging.debug("pickle data")
         else:
             raise ValueError(
@@ -1539,7 +1496,6 @@ class SolverBinaryJobPath(SolverBinaryJob):
                         t = SolverLPJob(0, i_data, None, None)
                         t._transform(t.LP_data)
                         i_data = t.get_data()
-                        lp_datamodel_compat(i_data)
                         lpdata.append(LPData.parse_obj(i_data))
                     data = lpdata
                 else:
@@ -1549,7 +1505,6 @@ class SolverBinaryJobPath(SolverBinaryJob):
                     t = SolverLPJob(0, data, None, None)
                     t._transform(t.LP_data)
                     data = t.get_data()
-                    lp_datamodel_compat(data)
                     data = LPData.parse_obj(data)
             except Exception as e:
                 raise HTTPException(
@@ -1763,8 +1718,8 @@ class SolverBinaryResponse:
             res.set_result(exception_handler(e))
 
 
-# TOOD: ExitJob is meant for the solver, Shutdown and
-# CudaUnhealty are meant for the result thread
+# TODO: ExitJob is meant for the solver, Shutdown and
+# CudaUnhealthy are meant for the result thread
 # Probably should be in different class hierarchies.
 # The latter two probably ought to be SolveResponses
 class ExitJob:

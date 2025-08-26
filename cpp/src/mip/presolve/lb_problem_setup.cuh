@@ -24,7 +24,7 @@
 namespace cuopt::linear_programming::detail {
 
 template <typename i_t>
-struct calc_blocks_per_item_t : public thrust::unary_function<i_t, i_t> {
+struct calc_blocks_per_item_t {
   calc_blocks_per_item_t(raft::device_span<const i_t> offsets_, i_t work_per_block_)
     : offsets(offsets_), work_per_block(work_per_block_)
   {
@@ -39,7 +39,7 @@ struct calc_blocks_per_item_t : public thrust::unary_function<i_t, i_t> {
 };
 
 template <typename i_t>
-struct heavy_vertex_meta_t : public thrust::unary_function<i_t, i_t> {
+struct heavy_vertex_meta_t {
   heavy_vertex_meta_t(raft::device_span<const i_t> offsets_,
                       raft::device_span<i_t> vertex_id_,
                       raft::device_span<i_t> pseudo_block_id_)
