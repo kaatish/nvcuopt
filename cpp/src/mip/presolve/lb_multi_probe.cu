@@ -25,8 +25,8 @@
 #include <utilities/device_utils.cuh>
 
 #include <cub/cub.cuh>
-#include "lb_bounds_update_kernels.cuh"
-#include "lb_kernels/lb_constraint_slack_kernels.cuh"
+#include "lb_kernels/lb_multi_probe_bounds_update_kernels.cuh"
+#include "lb_kernels/lb_multi_probe_constraint_kernels.cuh"
 #include "lb_multi_probe.cuh"
 
 namespace cuopt::linear_programming::detail {

@@ -20,6 +20,7 @@
 #include <mip/utils.cuh>
 #include <raft/core/device_span.hpp>
 #include <utilities/lb_common_kernels.cuh>
+#include "lb_bounds_update_kernels.cuh"
 
 namespace cuopt::linear_programming::detail {
 
@@ -36,23 +37,6 @@ inline __device__ auto skip_update(upd_view_t upd_0, upd_view_t upd_1, i_t var_i
                             thrust::make_pair(skip_var_0, skip_var_1));
 }
 
-template <typename f_t2, typename f_t, typename upd_view_t>
-inline __device__ thrust::pair<bool, bool> skip_update(
-  f_t2 bnd_0, upd_view_t upd_0, f_t2 bnd_1, upd_view_t upd_1, f_t int_tol)
-{
-  return thrust::make_pair((bnd_0.x + int_tol >= bnd_0.y), (bnd_1.x + int_tol >= bnd_1.y));
-}
-
-template <int MAX_EDGE_PER_VAR, typename i_t, typename csr_view_t, typename upd_view_t>
-__device__ void update_next_changed_constraints(
-  csr_view_t view, upd_view_t upd, i_t tid, i_t beg, i_t end)
-{
-  for (i_t i = tid + beg; i < end; i += MAX_EDGE_PER_VAR) {
-    auto cnst_idx = view.col_elem[i];
-    atomicExch(&upd.next_changed_constraints[cnst_idx], 1);
-  }
-}
-
 template <int MAX_EDGE_PER_VAR, typename i_t, typename csr_view_t, typename upd_view_t>
 __device__ void update_next_changed_constraints(
   csr_view_t view, upd_view_t upd0, upd_view_t upd1, i_t tid, i_t beg, i_t end)
@@ -62,59 +46,6 @@ __device__ void update_next_changed_constraints(
     atomicExch(&upd0.next_changed_constraints[cnst_idx], 1);
     atomicExch(&upd1.next_changed_constraints[cnst_idx], 1);
   }
-}
-
-template <typename f_t, typename f_t2>
-__device__ f_t2 update_bounds_per_cnst(f_t coeff, f_t2 cnst_slack, f_t2 old_bnd, f_t2 bounds)
-{
-  f_t min_contrib = old_bnd.x;
-  f_t max_contrib = old_bnd.y;
-  if (coeff < 0.0) {
-    min_contrib = old_bnd.y;
-    max_contrib = old_bnd.x;
-  }
-
-  auto delta_min_act = (cnst_slack.x + (coeff * min_contrib)) / coeff;
-  auto delta_max_act = (cnst_slack.y + (coeff * max_contrib)) / coeff;
-
-  f_t lb_contrib = delta_max_act;
-  f_t ub_contrib = delta_min_act;
-  if (coeff < 0.0) {
-    lb_contrib = delta_min_act;
-    ub_contrib = delta_max_act;
-  }
-  bounds.x = max(bounds.x, lb_contrib);
-  bounds.y = min(bounds.y, ub_contrib);
-  return bounds;
-}
-
-template <typename i_t,
-          int MAX_EDGE_PER_VAR,
-          typename f_t2,
-          typename csr_view_t,
-          typename upd_view_t>
-__device__ f_t2
-update_bounds(csr_view_t view, upd_view_t upd, i_t tid, i_t beg, i_t end, f_t2 old_bounds)
-{
-  f_t2 bounds = old_bounds;
-
-  for (i_t i = tid + beg; i < end; i += MAX_EDGE_PER_VAR) {
-    auto coeff    = view.coefficients[i];
-    auto cnst_idx = view.col_elem[i];
-
-    // cnst_slack[cnst_idx].x now has cnst_ub - min_a
-    // cnst_slack[cnst_idx].y now has cnst_lb - max_a
-    auto cnst_slack = upd.cnst_slack[cnst_idx];
-    //  don't propagate over constraints that are infeasible
-    // TODO : write changed_constraints = 0 for infeasible constraints while calculating activity
-    if ((upd.changed_constraints[cnst_idx] == 0) || isnan(cnst_slack.x)) {
-      continue;
-    } else {
-      bounds = update_bounds_per_cnst(coeff, cnst_slack, old_bounds, bounds);
-    }
-  }
-
-  return bounds;
 }
 
 template <typename i_t,
@@ -261,53 +192,6 @@ __device__ void bnd_heavy(i_t id_block_beg,
   }
 }
 
-template <typename csr_view_t, typename upd_view_t, typename i_t, typename f_t2>
-inline __device__ void write_updated_bounds_heavy(
-  csr_view_t view, upd_view_t upd, i_t var_idx, bool is_int, f_t2 bounds, f_t2 old_bounds)
-{
-  auto heavy_var_id_offset = var_idx - view.heavy_beg_id;
-  auto threshold           = 1e3 * view.tolerances.absolute_tolerance;
-  if (is_int) {
-    bounds.x = ceil(bounds.x - view.tolerances.integrality_tolerance);
-    bounds.y = floor(bounds.y + view.tolerances.integrality_tolerance);
-  }
-  auto lb_updated = (fabs(bounds.x - old_bounds.x) > threshold);
-  auto ub_updated = (fabs(bounds.y - old_bounds.y) > threshold);
-
-  cuda::atomic_ref<double> lb(upd.vars_bnd[var_idx].x);
-  cuda::atomic_ref<double> ub(upd.vars_bnd[var_idx].y);
-
-  if (lb_updated) { lb.fetch_max(bounds.x); }
-  if (ub_updated) { lb.fetch_min(bounds.y); }
-
-  if (lb_updated || ub_updated) {
-    atomicExch(&upd.heavy_bounds_changed_agg[heavy_var_id_offset], 1);
-  }
-  if ((bounds.x != old_bounds.x) || (bounds.y != old_bounds.y)) {
-    atomicExch(&upd.heavy_bounds_changed[heavy_var_id_offset], 1);
-  }
-}
-
-template <typename csr_view_t, typename upd_view_t, typename i_t, typename f_t2>
-inline __device__ bool write_updated_bounds(
-  csr_view_t view, upd_view_t upd, i_t var_idx, bool is_int, f_t2 bounds, f_t2 old_bounds)
-{
-  auto threshold = 1e3 * view.tolerances.absolute_tolerance;
-  if (is_int) {
-    bounds.x = ceil(bounds.x - view.tolerances.integrality_tolerance);
-    bounds.y = floor(bounds.y + view.tolerances.integrality_tolerance);
-  }
-  auto lb_updated = (fabs(bounds.x - old_bounds.x) > threshold);
-  auto ub_updated = (fabs(bounds.y - old_bounds.y) > threshold);
-
-  if (lb_updated) { upd.vars_bnd[var_idx].x = bounds.x; }
-  if (ub_updated) { upd.vars_bnd[var_idx].y = bounds.y; }
-
-  if (lb_updated || ub_updated) { atomicAdd(upd.bounds_changed, 1); }
-  if (bounds.x != old_bounds.x || bounds.y != old_bounds.y) { return true; }
-  return false;
-}
-
 template <typename f_t,
           int BDIM,
           int MAX_EDGE_PER_CNST,
@@ -334,7 +218,7 @@ __device__ void bnd_sub_warp(i_t id_warp_beg,
 
   thrust::pair<f_t2, f_t2> bounds;
   bool valid_item                    = (idx < id_range_end);
-  thrust::pair<bool, bool> skip_calc = thrust::make_pair(valid_item, valid_item);
+  thrust::pair<bool, bool> skip_calc = thrust::make_pair(!valid_item, !valid_item);
   if (valid_item) {
     var_idx = view.reorg_ids[idx];
     thrust::tie(old_bounds, skip_calc) =
@@ -424,7 +308,7 @@ __device__ void bnd_warp(i_t id_block_beg,
 
   thrust::pair<f_t2, f_t2> bounds;
   bool valid_item                    = (idx < id_range_end);
-  thrust::pair<bool, bool> skip_calc = thrust::make_pair(valid_item, valid_item);
+  thrust::pair<bool, bool> skip_calc = thrust::make_pair(!valid_item, !valid_item);
   if (valid_item) {
     var_idx = view.reorg_ids[idx];
     thrust::tie(old_bounds, skip_calc) =
@@ -514,7 +398,7 @@ __device__ void bnd_block(i_t id_block_beg,
     f_t2{-std::numeric_limits<f_t>::infinity(), std::numeric_limits<f_t>::infinity()});
   thrust::pair<f_t2, f_t2> bounds;
   bool valid_item                    = (idx < id_range_end);
-  thrust::pair<bool, bool> skip_calc = thrust::make_pair(valid_item, valid_item);
+  thrust::pair<bool, bool> skip_calc = thrust::make_pair(!valid_item, !valid_item);
   if (valid_item) {
     var_idx = view.reorg_ids[idx];
     thrust::tie(old_bounds, skip_calc) =
