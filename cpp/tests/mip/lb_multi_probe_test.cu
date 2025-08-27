@@ -200,7 +200,8 @@ void init_handler(const raft::handle_t* handle_ptr)
 std::tuple<std::vector<int>, std::vector<double>, std::vector<double>> select_k_random(
   detail::problem_t<int, double>& problem, int sample_size)
 {
-  auto seed = std::random_device{}();
+  // auto seed = std::random_device{}();
+  unsigned long seed = 3737687305ul;
   std::cout << "Tested with seed " << seed << "\n";
   problem.compute_n_integer_vars();
   auto v_lb       = host_copy(problem.variable_lower_bounds);
@@ -269,27 +270,23 @@ bounds_probe_results(detail::bound_presolve_t<int, double>& bnd_prb_0,
     std::move(h_lb_0), std::move(h_ub_0), std::move(h_lb_1), std::move(h_ub_1));
 }
 
-// std::tuple<std::vector<double>, std::vector<double>, std::vector<double>, std::vector<double>>
-// multi_probe_results(
-//   detail::lb_multi_probe_t<int, double>& prb,
-//   detail::problem_t<int, double>& problem,
-//   const std::tuple<std::vector<int>, std::vector<double>, std::vector<double>>& probe_tuple)
-//{
-//   prb.solve(problem, probe_tuple);
-//   rmm::device_uvector<double> m_lb_0(problem.n_variables, problem.handle_ptr->get_stream());
-//   rmm::device_uvector<double> m_ub_0(problem.n_variables, problem.handle_ptr->get_stream());
-//   rmm::device_uvector<double> m_lb_1(problem.n_variables, problem.handle_ptr->get_stream());
-//   rmm::device_uvector<double> m_ub_1(problem.n_variables, problem.handle_ptr->get_stream());
-//   prb.set_updated_bounds(problem.handle_ptr, make_span(m_lb_0), make_span(m_ub_0), 0);
-//   prb.set_updated_bounds(problem.handle_ptr, make_span(m_lb_1), make_span(m_ub_1), 1);
-//
-//   auto h_lb_0 = host_copy(m_lb_0);
-//   auto h_ub_0 = host_copy(m_ub_0);
-//   auto h_lb_1 = host_copy(m_lb_1);
-//   auto h_ub_1 = host_copy(m_ub_1);
-//   return std::make_tuple(
-//     std::move(h_lb_0), std::move(h_ub_0), std::move(h_lb_1), std::move(h_ub_1));
-// }
+std::tuple<std::vector<double>, std::vector<double>> multi_probe_results(
+  detail::lb_multi_probe_t<int, double>& prb,
+  detail::lb_problem_t<int, double>& lb_problem,
+  const std::tuple<std::vector<int>, std::vector<double>, std::vector<double>>& probe_tuple)
+{
+  prb.solve(lb_problem, probe_tuple);
+  rmm::device_uvector<double> m_bnd_0(2 * lb_problem.n_variables,
+                                      lb_problem.handle_ptr->get_stream());
+  rmm::device_uvector<double> m_bnd_1(2 * lb_problem.n_variables,
+                                      lb_problem.handle_ptr->get_stream());
+  prb.set_updated_bounds(lb_problem.handle_ptr, make_span(m_bnd_0), 0);
+  prb.set_updated_bounds(lb_problem.handle_ptr, make_span(m_bnd_1), 1);
+
+  auto h_bnd_0 = host_copy(m_bnd_0);
+  auto h_bnd_1 = host_copy(m_bnd_1);
+  return std::make_tuple(std::move(h_bnd_0), std::move(h_bnd_1));
+}
 
 #if 0
 void old_test_multi_probe(std::string path)
@@ -707,21 +704,120 @@ void test_multi_probe(std::string path)
   }
 }
 
-TEST(presolve, multi_probe)
+void test_lb_multi_probe(std::string path)
+{
+  auto memory_resource = make_async();
+  rmm::mr::set_current_device_resource(memory_resource.get());
+  const raft::handle_t handle_{};
+  cuopt::mps_parser::mps_data_model_t<int, double> mps_problem =
+    cuopt::mps_parser::parse_mps<int, double>(path, false);
+  handle_.sync_stream();
+  auto op_problem = mps_data_model_to_optimization_problem(&handle_, mps_problem);
+  problem_checking_t<int, double>::check_problem_representation(op_problem);
+  detail::problem_t<int, double> problem(op_problem);
+
+  problem.preprocess_problem();
+  detail::trivial_presolve(problem);
+
+  mip_solver_settings_t<int, double> default_settings{};
+  detail::pdhg_solver_t<int, double> pdhg_solver(problem.handle_ptr, problem);
+  detail::pdlp_initial_scaling_strategy_t<int, double> scaling(&handle_,
+                                                               problem,
+                                                               10,
+                                                               1.0,
+                                                               pdhg_solver,
+                                                               problem.reverse_coefficients,
+                                                               problem.reverse_offsets,
+                                                               problem.reverse_constraints,
+                                                               true);
+  detail::mip_solver_t<int, double> solver(problem, default_settings, scaling, cuopt::timer_t(0));
+  detail::bound_presolve_t<int, double> bnd_prb_0(solver.context);
+  detail::bound_presolve_t<int, double> bnd_prb_1(solver.context);
+
+  detail::lb_problem_t<int, double> lb_problem(problem);
+  detail::lb_multi_probe_t<int, double> multi_probe_prs(solver.context, lb_problem);
+
+  // int iter_lim = 2;
+  // bnd_prb_0.settings.iteration_limit = iter_lim;
+  // bnd_prb_1.settings.iteration_limit = iter_lim;
+
+  // multi_probe_prs.settings.iteration_limit = iter_lim;
+
+  auto probe_tuple       = select_k_random(problem, 100);
+  auto bounds_probe_vals = convert_probe_tuple(probe_tuple);
+
+  auto [bnd_lb_0, bnd_ub_0, bnd_lb_1, bnd_ub_1] =
+    bounds_probe_results(bnd_prb_0, bnd_prb_1, problem, bounds_probe_vals);
+  std::cout << "call multi_probe_results\n";
+  std::cout << std::endl;
+  auto [m_bnd_0, m_bnd_1] = multi_probe_results(multi_probe_prs, lb_problem, probe_tuple);
+  std::cout << "done multi_probe_results\n";
+  std::cout << std::endl;
+
+  auto c_lb = host_copy(problem.constraint_lower_bounds);
+  auto c_ub = host_copy(problem.constraint_upper_bounds);
+
+  auto bnd_min_act_0 = host_copy(bnd_prb_0.upd.min_activity);
+  auto bnd_max_act_0 = host_copy(bnd_prb_0.upd.max_activity);
+  auto bnd_min_act_1 = host_copy(bnd_prb_1.upd.min_activity);
+  auto bnd_max_act_1 = host_copy(bnd_prb_1.upd.max_activity);
+
+  auto mlp_cnst_slack_0 = host_copy(multi_probe_prs.upd_0.cnst_slack);
+  auto mlp_cnst_slack_1 = host_copy(multi_probe_prs.upd_1.cnst_slack);
+
+  auto roff = host_copy(problem.reverse_offsets);
+
+  for (int i = 0; i < (int)bnd_min_act_0.size(); ++i) {
+    auto mlp_min_act_0 = c_ub[i] - mlp_cnst_slack_0[2 * i];
+    auto mlp_max_act_0 = c_lb[i] - mlp_cnst_slack_0[2 * i + 1];
+    auto mlp_min_act_1 = c_ub[i] - mlp_cnst_slack_1[2 * i];
+    auto mlp_max_act_1 = c_lb[i] - mlp_cnst_slack_1[2 * i + 1];
+    EXPECT_DOUBLE_EQ(bnd_min_act_0[i], mlp_min_act_0);
+    EXPECT_DOUBLE_EQ(bnd_max_act_0[i], mlp_max_act_0);
+    EXPECT_DOUBLE_EQ(bnd_min_act_1[i], mlp_min_act_1);
+    EXPECT_DOUBLE_EQ(bnd_max_act_1[i], mlp_max_act_1);
+  }
+  std::cout << "tested activity\n";
+  std::cout << std::endl;
+
+  for (int i = 0; i < (int)bnd_lb_0.size(); ++i) {
+    auto deg = roff[i + 1] - roff[i];
+    EXPECT_DOUBLE_EQ(bnd_lb_0[i], m_bnd_0[2 * i]) << i << " deg " << deg;
+    EXPECT_DOUBLE_EQ(bnd_ub_0[i], m_bnd_0[2 * i + 1]) << i << " deg " << deg;
+    EXPECT_DOUBLE_EQ(bnd_lb_1[i], m_bnd_1[2 * i]) << i << " deg " << deg;
+    EXPECT_DOUBLE_EQ(bnd_ub_1[i], m_bnd_1[2 * i + 1]) << i << " deg " << deg;
+  }
+}
+
+// TEST(presolve, multi_probe)
+//{
+//   std::vector<std::string> test_instances = {
+//     "mip/neos5-free-bound.mps", "mip/neos5-free-bound.mps"};
+//     //"mip/50v-10-free-bound.mps", "mip/neos5-free-bound.mps", "mip/neos5.mps"};
+//   for (const auto& test_instance : test_instances) {
+//     std::cout << "Running: " << test_instance << std::endl;
+//     auto path = make_path_absolute(test_instance);
+//     test_lb_multi_probe(path);
+//   }
+// }
+
+TEST(presolve, multi_probe_big)
 {
   // std::vector<std::string> test_instances = {"mip/50v-10-free-bound.mps",
   //                                            "mip/neos5-free-bound.mps"};
-  ////"mip/50v-10-free-bound.mps", "mip/neos5-free-bound.mps", "mip/neos5.mps"};
+  //"mip/50v-10-free-bound.mps", "mip/neos5-free-bound.mps", "mip/neos5.mps"};
   // for (const auto& test_instance : test_instances) {
-  //   std::cout << "Running: " << test_instance << std::endl;
-  //   auto path = make_path_absolute(test_instance);
-  //   test_multi_probe(path);
-  // }
-  std::string path = "/home/aatish/rapids/mip_files/miplib/square47.mps";
+  //  std::cout << "Running: " << test_instance << std::endl;
+  //  auto path = make_path_absolute(test_instance);
+  //  test_multi_probe(path);
+  //}
+  // std::string path = "/home/aatish/rapids/mip_files/miplib/square47.mps";
   // std::string path = "/home/aatish/rapids/mip_files/miplib/neos17.mps";
   // std::string path = "/home/aatish/rapids/mip_files/miplib/sing44.mps";
   // std::string path = "/home/aatish/rapids/mip_files/miplib/neos-3402454-bohle.mps";
-  test_multi_probe(path);
+  // std::string path = "/home/aatish/rapids/mip_files/miplib/neos-3402454-bohle.mps";
+  std::string path = "/home/aatish/rapids/mip_files/miplib/timtab1.mps";
+  test_lb_multi_probe(path);
 }
 
 }  // namespace cuopt::linear_programming::test

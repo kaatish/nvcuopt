@@ -63,11 +63,12 @@ inline __device__ void write_cnst_slack(
   upd_view_t view, i_t cnst_idx, f_t2 cnst_lb_ub, f_t2 act, f_t eps)
 {
   auto cnst_prop = f_t2{cnst_lb_ub.y - act.x, cnst_lb_ub.x - act.y};
-  if constexpr (erase_inf_cnst) {
-    if ((0 > cnst_prop.x + eps) || (eps < cnst_prop.y)) {
-      cnst_prop.x = std::numeric_limits<f_t>::quiet_NaN();
-    }
+  // if constexpr (erase_inf_cnst) {
+  if ((0 > cnst_prop.x + eps) || (eps < cnst_prop.y)) {
+    // cnst_prop.x = std::numeric_limits<f_t>::quiet_NaN();
+    view.changed_constraints[cnst_idx] = 0;
   }
+  //}
   view.cnst_slack[cnst_idx] = cnst_prop;
 }
 

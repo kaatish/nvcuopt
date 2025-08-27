@@ -44,6 +44,7 @@ void lb_multi_probe_t<i_t, f_t>::resize(lb_problem_t<i_t, f_t>& problem)
 {
   upd_0.resize(problem);
   upd_1.resize(problem);
+  host_bounds.resize(2 * problem.n_variables);
 }
 
 template <typename i_t, typename f_t>
@@ -60,16 +61,17 @@ void lb_multi_probe_t<i_t, f_t>::calculate_constraint_slack_iter(lb_problem_t<i_
 {
   auto num_blocks = problem.cnst_csr.sub_warp_block_count + problem.cnst_csr.med_block_count +
                     problem.cnst_csr.num_blocks_heavy;
-  std::cout << "call_cnst_slack sub_warp_block_count " << problem.cnst_csr.sub_warp_block_count
-            << "\n";
-  std::cout << "call_cnst_slack med_block_count " << problem.cnst_csr.med_block_count << "\n";
-  std::cout << "call_cnst_slack num_blocks_heavy " << problem.cnst_csr.num_blocks_heavy << "\n";
+  // std::cout << "call_cnst_slack sub_warp_block_count " << problem.cnst_csr.sub_warp_block_count
+  //           << "\n";
+  // std::cout << "call_cnst_slack med_block_count " << problem.cnst_csr.med_block_count << "\n";
+  // std::cout << "call_cnst_slack num_blocks_heavy " << problem.cnst_csr.num_blocks_heavy << "\n";
 
-  std::cout << "call_cnst_slack sub_warp+med "
-            << problem.cnst_csr.sub_warp_block_count + problem.cnst_csr.med_block_count << "\n";
+  // std::cout << "call_cnst_slack sub_warp+med "
+  //           << problem.cnst_csr.sub_warp_block_count + problem.cnst_csr.med_block_count << "\n";
 
-  std::cout << "num_heavy_items " << problem.n_constraints - problem.cnst_csr.heavy_beg_id << "\n";
-  constexpr bool erase_inf_cnst = true;
+  // std::cout << "num_heavy_items " << problem.n_constraints - problem.cnst_csr.heavy_beg_id <<
+  // "\n";
+  constexpr bool erase_inf_cnst = false;
   call_cnst_slack<erase_inf_cnst, i_t, f_t, 512><<<num_blocks, 512, 0, handle_ptr->get_stream()>>>(
     problem.cnst_csr.view(), upd_0.view(), upd_1.view());
   if (problem.cnst_csr.num_blocks_heavy != 0) {
@@ -81,20 +83,23 @@ void lb_multi_probe_t<i_t, f_t>::calculate_constraint_slack_iter(lb_problem_t<i_
 }
 
 template <typename i_t, typename f_t>
-void lb_multi_probe_t<i_t, f_t>::calculate_bounds_update(lb_problem_t<i_t, f_t>& problem,
+bool lb_multi_probe_t<i_t, f_t>::calculate_bounds_update(lb_problem_t<i_t, f_t>& problem,
                                                          const raft::handle_t* handle_ptr)
 {
+  constexpr i_t zero = 0;
+  upd_0.bounds_changed.set_value_async(zero, handle_ptr->get_stream());
+  upd_1.bounds_changed.set_value_async(zero, handle_ptr->get_stream());
   auto num_blocks = problem.vars_csr.sub_warp_block_count + problem.vars_csr.med_block_count +
                     problem.vars_csr.num_blocks_heavy;
-  std::cout << "call_bnd_update sub_warp_block_count " << problem.vars_csr.sub_warp_block_count
-            << "\n";
-  std::cout << "call_bnd_update med_block_count " << problem.vars_csr.med_block_count << "\n";
-  std::cout << "call_bnd_update num_blocks_heavy " << problem.vars_csr.num_blocks_heavy << "\n";
+  // std::cout << "call_bnd_update sub_warp_block_count " << problem.vars_csr.sub_warp_block_count
+  //           << "\n";
+  // std::cout << "call_bnd_update med_block_count " << problem.vars_csr.med_block_count << "\n";
+  // std::cout << "call_bnd_update num_blocks_heavy " << problem.vars_csr.num_blocks_heavy << "\n";
 
-  std::cout << "call_bnd_update sub_warp+med "
-            << problem.vars_csr.sub_warp_block_count + problem.vars_csr.med_block_count << "\n";
+  // std::cout << "call_bnd_update sub_warp+med "
+  //           << problem.vars_csr.sub_warp_block_count + problem.vars_csr.med_block_count << "\n";
 
-  std::cout << "num_heavy_items " << problem.n_variables - problem.vars_csr.heavy_beg_id << "\n";
+  // std::cout << "num_heavy_items " << problem.n_variables - problem.vars_csr.heavy_beg_id << "\n";
   call_bnd_update<i_t, f_t, 512><<<num_blocks, 512, 0, handle_ptr->get_stream()>>>(
     problem.vars_csr.view(), upd_0.view(), upd_1.view());
   if (problem.vars_csr.num_blocks_heavy != 0) {
@@ -102,6 +107,207 @@ void lb_multi_probe_t<i_t, f_t>::calculate_bounds_update(lb_problem_t<i_t, f_t>&
       <<<problem.vars_csr.num_blocks_heavy, 512, 0, handle_ptr->get_stream()>>>(
         problem.vars_csr.view(), upd_0.view(), upd_1.view());
   }
+  i_t h_bounds_changed_0 = upd_0.bounds_changed.value(handle_ptr->get_stream());
+  i_t h_bounds_changed_1 = upd_1.bounds_changed.value(handle_ptr->get_stream());
+
+  return (h_bounds_changed_0 != 0) || (h_bounds_changed_1 != 0);
+}
+
+template <typename i_t, typename f_t>
+termination_criterion_t lb_multi_probe_t<i_t, f_t>::bound_update_loop(
+  lb_problem_t<i_t, f_t>& pb, const raft::handle_t* handle_ptr, timer_t timer)
+{
+  termination_criterion_t criteria = termination_criterion_t::ITERATION_LIMIT;
+  if (init_changed_constraints) {
+    // all changed constraints are 1, next are zero
+    upd_0.init_changed_constraints(handle_ptr);
+    upd_1.init_changed_constraints(handle_ptr);
+  } else {
+    // reset for the next calls on the same object
+    init_changed_constraints = true;
+  }
+  i_t iter;
+  for (iter = 0; iter < settings.iteration_limit; ++iter) {
+    if (timer.check_time_limit()) {
+      criteria = termination_criterion_t::TIME_LIMIT;
+      break;
+    }
+    // calculate activity for both probes
+    calculate_constraint_slack_iter(pb, handle_ptr);
+    if (!calculate_bounds_update(pb, handle_ptr)) {
+      if (iter == 0) {
+        criteria = termination_criterion_t::NO_UPDATE;
+      } else {
+        criteria = termination_criterion_t::CONVERGENCE;
+      }
+      break;
+    }
+    // next_changed are updated, fill current changed with zero and swap
+    // swap next and current changed constraints
+    upd_0.prepare_for_next_iteration(handle_ptr);
+    upd_1.prepare_for_next_iteration(handle_ptr);
+  }
+  std::cout << "iter " << iter << "\n";
+  return criteria;
+}
+
+template <typename i_t, typename f_t>
+void lb_multi_probe_t<i_t, f_t>::update_device_bounds(const raft::handle_t* handle_ptr)
+{
+  cuopt_assert(upd_0.vars_bnd.size() == host_bounds.size(), "size of variable bound mismatch");
+  cuopt_assert(upd_1.vars_bnd.size() == host_bounds.size(), "size of variable bound mismatch");
+
+  raft::copy(
+    upd_0.vars_bnd.data(), host_bounds.data(), host_bounds.size(), handle_ptr->get_stream());
+  raft::copy(
+    upd_1.vars_bnd.data(), host_bounds.data(), host_bounds.size(), handle_ptr->get_stream());
+}
+
+template <typename i_t, typename f_t>
+void lb_multi_probe_t<i_t, f_t>::update_host_bounds(const raft::handle_t* handle_ptr,
+                                                    const raft::device_span<f_t> variable_bounds)
+{
+  cuopt_assert(variable_bounds.size() == host_bounds.size(), "size of variable bound mismatch");
+  raft::copy(
+    host_bounds.data(), variable_bounds.data(), variable_bounds.size(), handle_ptr->get_stream());
+}
+
+template <typename i_t, typename f_t>
+void lb_multi_probe_t<i_t, f_t>::set_bounds(
+  const std::tuple<std::vector<i_t>, std::vector<f_t>, std::vector<f_t>>& var_probe_vals,
+  const raft::handle_t* handle_ptr)
+{
+  using f_t2                           = typename type_2<f_t>::type;
+  const std::vector<i_t>& probe_vars   = std::get<0>(var_probe_vals);
+  const std::vector<f_t>& probe_vals_0 = std::get<1>(var_probe_vals);
+  const std::vector<f_t>& probe_vals_1 = std::get<2>(var_probe_vals);
+  auto d_vars                          = device_copy(probe_vars, handle_ptr->get_stream());
+  auto d_vals_0                        = device_copy(probe_vals_0, handle_ptr->get_stream());
+  auto d_vals_1                        = device_copy(probe_vals_1, handle_ptr->get_stream());
+
+  auto upd_0_v = upd_0.view();
+  auto upd_1_v = upd_1.view();
+  auto z_iter  = thrust::make_zip_iterator(
+    thrust::make_tuple(d_vars.begin(), d_vals_0.begin(), d_vals_1.begin()));
+  thrust::for_each(handle_ptr->get_thrust_policy(),
+                   z_iter,
+                   z_iter + d_vars.size(),
+                   [upd_0_v, upd_1_v] __device__(auto t) {
+                     auto idx              = thrust::get<0>(t);
+                     auto upd_0_val        = thrust::get<1>(t);
+                     auto upd_1_val        = thrust::get<2>(t);
+                     upd_0_v.vars_bnd[idx] = f_t2{upd_0_val, upd_0_val};
+                     upd_1_v.vars_bnd[idx] = f_t2{upd_1_val, upd_1_val};
+                   });
+  handle_ptr->sync_stream();
+  RAFT_CHECK_CUDA(handle_ptr->get_stream());
+}
+
+template <typename i_t, typename f_t>
+void lb_multi_probe_t<i_t, f_t>::set_interval_bounds(
+  const std::tuple<i_t, std::pair<f_t, f_t>, std::pair<f_t, f_t>>& var_interval_vals,
+  lb_problem_t<i_t, f_t>& pb,
+  const raft::handle_t* handle_ptr)
+{
+  using f_t2                              = typename type_2<f_t>::type;
+  const i_t& probe_var                    = std::get<0>(var_interval_vals);
+  const std::pair<f_t, f_t>& probe_vals_0 = std::get<1>(var_interval_vals);
+  const std::pair<f_t, f_t>& probe_vals_1 = std::get<2>(var_interval_vals);
+  run_device_lambda(handle_ptr->get_stream(),
+                    [probe_var = probe_var,
+                     lb_0      = probe_vals_0.first,
+                     ub_0      = probe_vals_0.second,
+                     lb_1      = probe_vals_1.first,
+                     ub_1      = probe_vals_1.second,
+                     upd_0_v   = upd_0.view(),
+                     upd_1_v   = upd_1.view()] __device__() {
+                      upd_0_v.vars_bnd[probe_var] = f_t2{lb_0, ub_0};
+                      upd_1_v.vars_bnd[probe_var] = f_t2{lb_1, ub_1};
+                    });
+  // init changed constraints
+  auto* orig_prob_ptr = pb.pb;
+  i_t var_offset_begin =
+    orig_prob_ptr->reverse_offsets.element(probe_var, handle_ptr->get_stream());
+  i_t var_offset_end =
+    orig_prob_ptr->reverse_offsets.element(probe_var + 1, handle_ptr->get_stream());
+  thrust::fill(handle_ptr->get_thrust_policy(),
+               upd_0.changed_constraints.begin(),
+               upd_0.changed_constraints.end(),
+               0);
+  thrust::fill(handle_ptr->get_thrust_policy(),
+               upd_1.changed_constraints.begin(),
+               upd_1.changed_constraints.end(),
+               0);
+  thrust::fill(handle_ptr->get_thrust_policy(),
+               upd_0.next_changed_constraints.begin(),
+               upd_0.next_changed_constraints.end(),
+               0);
+  thrust::fill(handle_ptr->get_thrust_policy(),
+               upd_1.next_changed_constraints.begin(),
+               upd_1.next_changed_constraints.end(),
+               0);
+  // set changed constraints from the vars
+  thrust::for_each(handle_ptr->get_thrust_policy(),
+                   orig_prob_ptr->reverse_constraints.begin() + var_offset_begin,
+                   orig_prob_ptr->reverse_constraints.begin() + var_offset_end,
+                   [upd_0_v = upd_0.view(), upd_1_v = upd_1.view()] __device__(auto i) {
+                     upd_0_v.changed_constraints[i] = 1;
+                     upd_1_v.changed_constraints[i] = 1;
+                   });
+  init_changed_constraints = false;
+  handle_ptr->sync_stream();
+  RAFT_CHECK_CUDA(handle_ptr->get_stream());
+}
+
+template <typename i_t, typename f_t>
+termination_criterion_t lb_multi_probe_t<i_t, f_t>::solve(
+  lb_problem_t<i_t, f_t>& pb,
+  const std::tuple<std::vector<i_t>, std::vector<f_t>, std::vector<f_t>>& var_probe_vals,
+  bool use_host_bounds)
+{
+  timer_t timer(settings.time_limit);
+  auto& handle_ptr = pb.handle_ptr;
+  if (use_host_bounds) {
+    update_device_bounds(handle_ptr);
+  } else {
+    copy_problem_into_probing_buffers(pb, handle_ptr);
+  }
+  set_bounds(var_probe_vals, handle_ptr);
+
+  return bound_update_loop(pb, handle_ptr, timer);
+}
+
+template <typename i_t, typename f_t>
+termination_criterion_t lb_multi_probe_t<i_t, f_t>::solve_for_interval(
+  lb_problem_t<i_t, f_t>& pb,
+  const std::tuple<i_t, std::pair<f_t, f_t>, std::pair<f_t, f_t>>& var_interval_vals,
+  const raft::handle_t* handle_ptr)
+{
+  timer_t timer(settings.time_limit);
+
+  copy_problem_into_probing_buffers(pb, handle_ptr);
+  set_interval_bounds(var_interval_vals, pb, handle_ptr);
+
+  return bound_update_loop(pb, handle_ptr, timer);
+}
+
+template <typename i_t, typename f_t>
+void lb_multi_probe_t<i_t, f_t>::set_updated_bounds(const raft::handle_t* handle_ptr,
+                                                    raft::device_span<f_t> output_bounds,
+                                                    i_t select_update)
+{
+  auto& bounds = select_update ? upd_1.vars_bnd : upd_0.vars_bnd;
+
+  cuopt_assert(bounds.size() == output_bounds.size(), "size of variable upper bound mismatch");
+  raft::copy(output_bounds.data(), bounds.data(), bounds.size(), handle_ptr->get_stream());
+}
+
+template <typename i_t, typename f_t>
+void lb_multi_probe_t<i_t, f_t>::set_updated_bounds(lb_problem_t<i_t, f_t>& pb,
+                                                    i_t select_update,
+                                                    const raft::handle_t* handle_ptr)
+{
+  set_updated_bounds(handle_ptr, make_span(pb.vars_bnd), select_update);
 }
 
 #if MIP_INSTANTIATE_FLOAT

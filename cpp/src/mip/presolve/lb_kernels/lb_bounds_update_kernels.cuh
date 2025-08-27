@@ -42,7 +42,8 @@ __device__ void update_next_changed_constraints(
 }
 
 template <typename f_t, typename f_t2>
-__device__ f_t2 update_bounds_per_cnst(f_t coeff, f_t2 cnst_slack, f_t2 old_bnd, f_t2 bounds)
+__device__ f_t2
+update_bounds_per_cnst(f_t coeff, f_t2 cnst_slack, f_t2 old_bnd, f_t2 bounds, bool debug = false)
 {
   f_t min_contrib = old_bnd.x;
   f_t max_contrib = old_bnd.y;
@@ -53,6 +54,7 @@ __device__ f_t2 update_bounds_per_cnst(f_t coeff, f_t2 cnst_slack, f_t2 old_bnd,
 
   auto delta_min_act = (cnst_slack.x + (coeff * min_contrib)) / coeff;
   auto delta_max_act = (cnst_slack.y + (coeff * max_contrib)) / coeff;
+  if (debug) { printf("lbbound delta_min %f delta_max %f\n", delta_min_act, delta_max_act); }
 
   f_t lb_contrib = delta_max_act;
   f_t ub_contrib = delta_min_act;

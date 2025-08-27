@@ -42,45 +42,48 @@ class lb_multi_probe_t {
                    settings_t settings = settings_t{});
   void resize(lb_problem_t<i_t, f_t>& problem);
 
-  // termination_criterion_t solve(
-  //   lb_problem_t<i_t, f_t>& pb,
-  //   const std::tuple<std::vector<i_t>, std::vector<f_t>, std::vector<f_t>>& var_probe_vals);
+  termination_criterion_t solve(
+    lb_problem_t<i_t, f_t>& pb,
+    const std::tuple<std::vector<i_t>, std::vector<f_t>, std::vector<f_t>>& var_probe_vals,
+    bool use_host_bounds = false);
 
-  // termination_criterion_t solve_for_interval(
-  //   lb_problem_t<i_t, f_t>& pb,
-  //   const std::tuple<i_t, std::pair<f_t, f_t>, std::pair<f_t, f_t>>& var_interval_vals,
-  //   const raft::handle_t* handle_ptr);
+  termination_criterion_t solve_for_interval(
+    lb_problem_t<i_t, f_t>& pb,
+    const std::tuple<i_t, std::pair<f_t, f_t>, std::pair<f_t, f_t>>& var_interval_vals,
+    const raft::handle_t* handle_ptr);
 
   void calculate_constraint_slack_iter(lb_problem_t<i_t, f_t>& problem,
                                        const raft::handle_t* handle_ptr);
   // void calculate_activity(problem_t<i_t, f_t>& pb, const raft::handle_t* handle_ptr);
-  void calculate_bounds_update(lb_problem_t<i_t, f_t>& pb, const raft::handle_t* handle_ptr);
-  // void set_updated_bounds(problem_t<i_t, f_t>& pb,
-  //                         i_t select_update,
-  //                         const raft::handle_t* handle_ptr);
-  // void set_updated_bounds(const raft::handle_t* handle_ptr,
-  //                         raft::device_span<f_t> output_lb,
-  //                         raft::device_span<f_t> output_ub,
-  //                         i_t select_update);
-  // termination_criterion_t bound_update_loop(problem_t<i_t, f_t>& pb,
-  //                                           const raft::handle_t* handle_ptr,
-  //                                           timer_t timer);
-  // void set_interval_bounds(
-  //   const std::tuple<i_t, std::pair<f_t, f_t>, std::pair<f_t, f_t>>& var_interval_vals,
-  //   problem_t<i_t, f_t>& pb,
-  //   const raft::handle_t* handle_ptr);
-  // void set_bounds(
-  //   const std::tuple<std::vector<i_t>, std::vector<f_t>, std::vector<f_t>>& var_probe_vals,
-  //   const raft::handle_t* handle_ptr);
+  bool calculate_bounds_update(lb_problem_t<i_t, f_t>& pb, const raft::handle_t* handle_ptr);
+  void set_updated_bounds(lb_problem_t<i_t, f_t>& pb,
+                          i_t select_update,
+                          const raft::handle_t* handle_ptr);
+  void set_updated_bounds(const raft::handle_t* handle_ptr,
+                          raft::device_span<f_t> output_bounds,
+                          i_t select_update);
+  termination_criterion_t bound_update_loop(lb_problem_t<i_t, f_t>& pb,
+                                            const raft::handle_t* handle_ptr,
+                                            timer_t timer);
+  void set_interval_bounds(
+    const std::tuple<i_t, std::pair<f_t, f_t>, std::pair<f_t, f_t>>& var_interval_vals,
+    lb_problem_t<i_t, f_t>& pb,
+    const raft::handle_t* handle_ptr);
+  void set_bounds(
+    const std::tuple<std::vector<i_t>, std::vector<f_t>, std::vector<f_t>>& var_probe_vals,
+    const raft::handle_t* handle_ptr);
   // void constraint_stats(problem_t<i_t, f_t>& pb, const raft::handle_t* handle_ptr);
   void copy_problem_into_probing_buffers(lb_problem_t<i_t, f_t>& pb,
                                          const raft::handle_t* handle_ptr);
+  void update_host_bounds(const raft::handle_t* handle_ptr,
+                          const raft::device_span<f_t> variable_bounds);
+  void update_device_bounds(const raft::handle_t* handle_ptr);
 
   mip_solver_context_t<i_t, f_t>& context;
   lb_bounds_update_data_t<i_t, f_t> upd_0;
   lb_bounds_update_data_t<i_t, f_t> upd_1;
-  bool skip_0;
-  bool skip_1;
+  std::vector<f_t> host_bounds;
+
   settings_t settings;
   bool compute_stats             = true;
   bool init_changed_constraints  = true;
