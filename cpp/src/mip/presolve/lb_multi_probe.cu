@@ -147,9 +147,54 @@ termination_criterion_t lb_multi_probe_t<i_t, f_t>::bound_update_loop(
     upd_0.prepare_for_next_iteration(handle_ptr);
     upd_1.prepare_for_next_iteration(handle_ptr);
   }
-  std::cout << "iter " << iter << "\n";
+  if (compute_stats) { constraint_stats(pb, handle_ptr); }
   return criteria;
 }
+
+// template <typename i_t, typename f_t>
+// void lb_multi_probe_t<i_t, f_t>::foo(const raft::handle_t* handle_ptr)
+//{
+//   cudaGraphNode_t cnst_slack_node;
+//
+//   {
+//     auto num_blocks = problem.cnst_csr.sub_warp_block_count + problem.cnst_csr.med_block_count +
+//                       problem.cnst_csr.num_blocks_heavy;
+//     auto csr_view = problem.cnst_csr.view();
+//     auto upd_0_view = upd_0.view();
+//     auto upd_1_view = upd_1.view();
+//
+//     void* kernelArgs[] = {&csr_view, &upd_0_view, &upd_1_view};
+//     cudaKernelNodeParams kernelNodeParams = {0};
+//     kernelNodeParams.func =
+//       (void*)call_cnst_slack<false, i_t, f_t, 512, csr_data_view_t<i_t, f_t>,
+//       lb_bounds_update_data_t<i_t, f_t>::view_t>;
+//     kernelNodeParams.gridDim        = dim3(num_blocks, 1, 1);
+//     kernelNodeParams.blockDim       = dim3(512, 1, 1);
+//     kernelNodeParams.sharedMemBytes = 0;
+//     kernelNodeParams.kernelParams   = (void**)kernelArgs;
+//     kernelNodeParams.extra          = NULL;
+//
+//     //add
+//   }
+//
+//   if (problem.cnst_csr.num_blocks_heavy != 0) {
+//     auto csr_view = problem.cnst_csr.view();
+//     auto upd_0_view = upd_0.view();
+//     auto upd_1_view = upd_1.view();
+//
+//     void* kernelArgs[] = {&csr_view, &upd_0_view, &upd_1_view};
+//     cudaKernelNodeParams kernelNodeParams = {0};
+//     kernelNodeParams.func =
+//       (void*)finalize_cnst_heavy<false, i_t, f_t, 32, csr_data_view_t<i_t, f_t>,
+//       lb_bounds_update_data_t<i_t, f_t>::view_t>;
+//     kernelNodeParams.gridDim        = dim3(problem.n_constraints - problem.cnst_csr.heavy_beg_id,
+//     1, 1); kernelNodeParams.blockDim       = dim3(32, 1, 1); kernelNodeParams.sharedMemBytes = 0;
+//     kernelNodeParams.kernelParams   = (void**)kernelArgs;
+//     kernelNodeParams.extra          = NULL;
+//
+//     //add
+//   }
+// }
 
 template <typename i_t, typename f_t>
 void lb_multi_probe_t<i_t, f_t>::update_device_bounds(const raft::handle_t* handle_ptr)
@@ -289,6 +334,84 @@ termination_criterion_t lb_multi_probe_t<i_t, f_t>::solve_for_interval(
   set_interval_bounds(var_interval_vals, pb, handle_ptr);
 
   return bound_update_loop(pb, handle_ptr, timer);
+}
+
+template <typename i_t, typename f_t, typename f_t2>
+struct detect_infeas_redun_t {
+  __device__ __forceinline__ thrust::tuple<i_t, i_t> operator()(
+    thrust::tuple<f_t2, f_t2, f_t, f_t> t) const
+  {
+    auto cnst_slack_0 = thrust::get<0>(t);
+    auto cnst_slack_1 = thrust::get<1>(t);
+    auto cnst_ub      = thrust::get<2>(t);
+    auto cnst_lb      = thrust::get<3>(t);
+    f_t eps           = get_cstr_tolerance<i_t, f_t>(
+      cnst_lb, cnst_ub, tolerances.absolute_tolerance, tolerances.relative_tolerance);
+    auto infeas_0 = (0 > cnst_slack_0.x + eps) || (0 < cnst_slack_0.y - eps);
+    auto infeas_1 = (0 > cnst_slack_1.x + eps) || (0 < cnst_slack_1.y - eps);
+    return thrust::make_tuple(infeas_0, infeas_1);
+  }
+
+ public:
+  detect_infeas_redun_t()                                             = delete;
+  detect_infeas_redun_t(const detect_infeas_redun_t<i_t, f_t, f_t2>&) = default;
+  detect_infeas_redun_t(const typename mip_solver_settings_t<i_t, f_t>::tolerances_t& tols)
+    : tolerances(tols)
+  {
+  }
+
+ private:
+  typename mip_solver_settings_t<i_t, f_t>::tolerances_t tolerances;
+};
+
+template <typename f_t>
+struct tuple_plus_t {
+  __device__ thrust::tuple<f_t, f_t> operator()(thrust::tuple<f_t, f_t> t0,
+                                                thrust::tuple<f_t, f_t> t1)
+  {
+    return thrust::make_tuple(thrust::get<0>(t0) + thrust::get<0>(t1),
+                              thrust::get<1>(t0) + thrust::get<1>(t1));
+  }
+  __device__ thrust::tuple<f_t, f_t, f_t, f_t> operator()(thrust::tuple<f_t, f_t, f_t, f_t> t0,
+                                                          thrust::tuple<f_t, f_t, f_t, f_t> t1)
+  {
+    return thrust::make_tuple(thrust::get<0>(t0) + thrust::get<0>(t1),
+                              thrust::get<1>(t0) + thrust::get<1>(t1),
+                              thrust::get<2>(t0) + thrust::get<2>(t1),
+                              thrust::get<3>(t0) + thrust::get<3>(t1));
+  }
+};
+
+template <typename i_t, typename f_t>
+void lb_multi_probe_t<i_t, f_t>::constraint_stats(lb_problem_t<i_t, f_t>& pb,
+                                                  const raft::handle_t* handle_ptr)
+{
+  using f_t2            = typename type_2<f_t>::type;
+  auto* orig_prob_ptr   = pb.pb;
+  auto upd_0_cnst_slack = upd_0.view().cnst_slack;
+  auto upd_1_cnst_slack = upd_1.view().cnst_slack;
+  auto detect_iter      = thrust::make_transform_iterator(
+    thrust::make_zip_iterator(thrust::make_tuple(upd_0_cnst_slack.begin(),
+                                                 upd_1_cnst_slack.begin(),
+                                                 orig_prob_ptr->constraint_upper_bounds.begin(),
+                                                 orig_prob_ptr->constraint_lower_bounds.begin())),
+    detect_infeas_redun_t<i_t, f_t, f_t2>(orig_prob_ptr->tolerances));
+
+  thrust::tie(infeas_constraints_count_0, infeas_constraints_count_1) =
+    thrust::reduce(handle_ptr->get_thrust_policy(),
+                   detect_iter,
+                   detect_iter + pb.n_constraints,
+                   thrust::make_tuple<i_t, i_t>(0, 0),
+                   tuple_plus_t<i_t>{});
+
+  RAFT_CHECK_CUDA(handle_ptr->get_stream());
+
+  if (infeas_constraints_count_0 > 0) {
+    CUOPT_LOG_TRACE("First probe: Infeasible constraint count %d", infeas_constraints_count_0);
+  }
+  if (infeas_constraints_count_1 > 0) {
+    CUOPT_LOG_TRACE("Second probe: Infeasible constraint count %d", infeas_constraints_count_1);
+  }
 }
 
 template <typename i_t, typename f_t>

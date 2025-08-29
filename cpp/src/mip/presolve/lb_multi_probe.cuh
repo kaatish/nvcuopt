@@ -72,7 +72,7 @@ class lb_multi_probe_t {
   void set_bounds(
     const std::tuple<std::vector<i_t>, std::vector<f_t>, std::vector<f_t>>& var_probe_vals,
     const raft::handle_t* handle_ptr);
-  // void constraint_stats(problem_t<i_t, f_t>& pb, const raft::handle_t* handle_ptr);
+  void constraint_stats(lb_problem_t<i_t, f_t>& pb, const raft::handle_t* handle_ptr);
   void copy_problem_into_probing_buffers(lb_problem_t<i_t, f_t>& pb,
                                          const raft::handle_t* handle_ptr);
   void update_host_bounds(const raft::handle_t* handle_ptr,
