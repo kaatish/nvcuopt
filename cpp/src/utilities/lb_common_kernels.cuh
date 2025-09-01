@@ -178,6 +178,16 @@ struct warp_reduce_t {
     return out;
   }
 
+  inline __device__ f_t2 max_min(f_t2& in, int valid_items)
+  {
+    f_t2 out;
+    out.x = warp_reduce(temp_storage[4 * (threadIdx.x / MAX_EDGE_PER_CNST) + 0])
+              .Reduce(in.x, cuda::maximum(), valid_items);
+    out.y = warp_reduce(temp_storage[4 * (threadIdx.x / MAX_EDGE_PER_CNST) + 1])
+              .Reduce(in.y, cuda::minimum(), valid_items);
+    return out;
+  }
+
   inline __device__ f_t2 sum(f_t2& in)
   {
     f_t2 out;

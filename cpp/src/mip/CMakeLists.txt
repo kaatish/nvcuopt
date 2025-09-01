@@ -37,6 +37,7 @@ list(PREPEND
   ${CMAKE_CURRENT_SOURCE_DIR}/local_search/line_segment_search/line_segment_search.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/presolve/bounds_presolve.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/presolve/bounds_update_data.cu
+  ${CMAKE_CURRENT_SOURCE_DIR}/presolve/lb_bounds_presolve.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/presolve/lb_bounds_update_data.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/presolve/lb_problem.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/presolve/lb_multi_probe.cu

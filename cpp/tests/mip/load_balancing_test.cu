@@ -22,8 +22,8 @@
 #include <linear_programming/initial_scaling_strategy/initial_scaling.cuh>
 #include <linear_programming/utilities/problem_checking.cuh>
 #include <mip/presolve/bounds_presolve.cuh>
-#include <mip/presolve/load_balanced_bounds_presolve.cuh>
-#include <mip/problem/load_balanced_problem.cuh>
+#include <mip/presolve/lb_bounds_presolve.cuh>
+#include <mip/presolve/lb_problem.cuh>
 #include <mps_parser/parser.hpp>
 #include <raft/core/handle.hpp>
 #include <raft/util/cudart_utils.hpp>
@@ -148,8 +148,8 @@ void test_multi_probe(std::string path)
                                                                problem.reverse_constraints,
                                                                true);
   detail::mip_solver_t<int, double> solver(problem, default_settings, scaling, cuopt::timer_t(0));
-  detail::load_balanced_problem_t<int, double> lb_problem(problem);
-  detail::load_balanced_bounds_presolve_t<int, double> lb_prs(lb_problem, solver.context);
+  detail::lb_problem_t<int, double> lb_problem(problem);
+  detail::lb_bound_presolve_t<int, double> lb_prs(solver.context, lb_problem);
 
   detail::bound_presolve_t<int, double> bnd_prb(solver.context);
 
@@ -165,9 +165,9 @@ void test_multi_probe(std::string path)
     auto h_lb = host_copy(b_lb);
     auto h_ub = host_copy(b_ub);
 
-    lb_prs.solve(probe_first);
+    lb_prs.solve(lb_problem, probe_first);
 
-    auto bnds = host_copy(lb_prs.vars_bnd);
+    auto bnds = host_copy(lb_prs.upd.vars_bnd);
     for (int i = 0; i < (int)h_lb.size(); ++i) {
       EXPECT_DOUBLE_EQ(bnds[2 * i], h_lb[i]);
       EXPECT_DOUBLE_EQ(bnds[2 * i + 1], h_ub[i]);
@@ -178,7 +178,9 @@ void test_multi_probe(std::string path)
 TEST(presolve, multi_probe)
 {
   std::vector<std::string> test_instances = {
-    "mip/50v-10-free-bound.mps", "mip/neos5-free-bound.mps", "mip/neos5.mps"};
+    //"mip/50v-10-free-bound.mps", "mip/neos5-free-bound.mps", "mip/neos5.mps"};
+    "mip/50v-10-free-bound.mps",
+    "mip/neos5-free-bound.mps"};
   for (const auto& test_instance : test_instances) {
     auto path = make_path_absolute(test_instance);
     test_multi_probe(path);

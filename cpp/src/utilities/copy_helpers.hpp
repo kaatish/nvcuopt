@@ -87,6 +87,24 @@ raft::device_span<const typename type_2<T>::type> make_span_2(
                                      sizeof(T) * container.size() / sizeof(T2));
 }
 
+template <typename T>
+raft::device_span<typename type_2<T>::type> make_span_2(raft::device_span<T> span)
+{
+  // TODO : ceildiv or throw assert
+  using T2 = typename type_2<T>::type;
+  return raft::device_span<T2>(reinterpret_cast<T2*>(span.data()),
+                               sizeof(T) * span.size() / sizeof(T2));
+}
+
+template <typename T>
+raft::device_span<const typename type_2<T>::type> make_span_2(raft::device_span<const T> span)
+{
+  // TODO : ceildiv or throw assert
+  using T2 = typename type_2<T>::type;
+  return raft::device_span<const T2>(reinterpret_cast<const T2*>(span.data()),
+                                     sizeof(T) * span.size() / sizeof(T2));
+}
+
 /**
  * @brief Simple utility function to copy device ptr to host
  *
